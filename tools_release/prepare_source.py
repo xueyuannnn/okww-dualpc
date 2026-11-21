@@ -29,6 +29,7 @@ CONTENT_RULES = {
     "access_token": re.compile(r"(?:ghp_|github_pat_|sk-proj-)[A-Za-z0-9_]{20,}"),
 }
 REQUIRED = {
+    "tools_release/prepare_environment.py", "native/tests/test_environment_packages.py",
     "LICENSE.txt", "README.md", "Build-Native.ps1", "UPSTREAM.lock.json",
     "native/CMakeLists.txt", "native/host/runtime/workshop.cpp",
     "workshop/bridge/workshop_worker.py", "src/gui/CharacterCodeTab.py",
@@ -203,6 +204,7 @@ def owned_directory(path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Audit only; do not create a source archive")
+    parser.add_argument("--archive-only", action="store_true", help="Write the verified ZIP without duplicating the extracted source tree")
     parser.add_argument("--output", type=Path, default=ROOT / "release-review")
     args = parser.parse_args()
     files, findings = inspect(git_files())
@@ -213,20 +215,31 @@ def main() -> None:
         raise SystemExit(1)
     if not args.check:
         output = args.output.resolve()
+        output.mkdir(parents=True, exist_ok=True)
         source = output / SOURCE_NAME
-        owned_directory(source)
-        for entry in files:
-            target = source / entry["path"]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(ROOT / entry["path"], target)
+        if not args.archive_only:
+            owned_directory(source)
+            for entry in files:
+                target = source / entry["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / entry["path"], target)
         manifest = {"version": "0.2.0", "channel": "preview", "files": files}
-        (source / "SOURCE-MANIFEST.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        if not args.archive_only:
+            (source / "SOURCE-MANIFEST.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         archive = output / SOURCE_ARCHIVE
         temporary = archive.with_suffix(".zip.tmp")
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=5) as zipped:
-            for path in sorted(source.rglob("*")):
-                if path.is_file() and path.name != ".source-review.json":
-                    zipped.write(path, SOURCE_NAME + "/" + path.relative_to(source).as_posix())
+            if args.archive_only:
+                for entry in files:
+                    path = ROOT / entry['path']
+                    if digest(path) != entry['sha256']:
+                        raise RuntimeError('Source changed during packaging: ' + entry['path'])
+                    zipped.write(path, SOURCE_NAME + '/' + entry['path'])
+                zipped.writestr(SOURCE_NAME + '/SOURCE-MANIFEST.json', json.dumps(manifest, indent=2))
+            else:
+                for path in sorted(source.rglob("*")):
+                    if path.is_file() and path.name != ".source-review.json":
+                        zipped.write(path, SOURCE_NAME + "/" + path.relative_to(source).as_posix())
         temporary.replace(archive)
         report["archive_sha256"] = digest(archive)
         (output / "source-audit.json").write_text(json.dumps(report, indent=2), encoding="utf-8")

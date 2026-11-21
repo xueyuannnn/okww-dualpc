@@ -66,26 +66,81 @@ function Protected([string]$relative) {
     if ($profileRelative -and ($relative -eq $profileRelative -or
         $relative.StartsWith($profileRelative+'/', [StringComparison]::OrdinalIgnoreCase))) { return $true }
     return $relative -match '^(native-full-data|native-teams|configs-dualpc|configs|ok_tasks|ok_import|ok_templates|workshop-library|\.updates)(/|$)' -or
-        $relative -match '^(dualpc\.json|native-device-settings\.json|native-ui\.json)$' -or
+        $relative -match '^(dualpc\.json|native-device-settings\.json|native-ui\.json|native-preview\.json)$' -or
         $relative -match '^native/personal(/|$)' -or
         $relative -match '^workshop-engine/(configs|logs|cache|screenshots|ok_tasks)(/|$)'
 }
 function Save-Json([string]$path, $value) {
     [IO.File]::WriteAllText($path, ($value | ConvertTo-Json -Depth 30), (New-Object Text.UTF8Encoding($false)))
 }
+function Read-InstalledManifest {
+    $installed = [IO.File]::ReadAllText((Inside $root 'PACKAGE.json')) | ConvertFrom-Json
+    if ($installed.PSObject.Properties['platform'] -and $installed.platform -ne 'win10-11-x64') {
+        throw 'This updater cannot modify a different Windows compatibility target'
+    }
+    if ($baseVersion -and (-not $installed.PSObject.Properties['release_version'] -or
+        ([string]$installed.release_version).TrimStart('v') -ne $baseVersion)) {
+        throw 'Incremental update requires a matching installed version; use the complete package'
+    }
+    return $installed
+}
 function Read-Manifest([string]$stage) {
     $manifestFile = Inside $stage 'PACKAGE.json'
     if ((New-Object IO.FileInfo $manifestFile).Length -gt 16777216) { throw 'Package manifest too large' }
     $manifest = [IO.File]::ReadAllText($manifestFile) | ConvertFrom-Json
     if ($manifest.variant -ne 'full' -or $manifest.runtime -ne 'C++ + Python workshop') { throw 'Not an ordinary complete package' }
+    if (($manifest.PSObject.Properties['platform'] -or $baseVersion) -and
+        (-not $manifest.PSObject.Properties['platform'] -or $manifest.platform -ne 'win10-11-x64')) {
+        throw 'Package platform does not match this installation'
+    }
+    $environmentFiles = @{}
+    if ($environmentUpdate) {
+        $environmentPath = Inside $stage 'ENVIRONMENT.json'
+        if (-not [IO.File]::Exists($environmentPath) -or (New-Object IO.FileInfo $environmentPath).Length -gt 16777216) {
+            throw 'Environment manifest missing or too large'
+        }
+        $environment = [IO.File]::ReadAllText($environmentPath) | ConvertFrom-Json
+        if ($manifest.package_kind -ne 'environment-update' -or $manifest.platform -ne 'win10-11-x64' -or
+            $environment.schema -ne 1 -or $environment.variant -ne 'environment' -or
+            $environment.platform -ne 'win10-11-x64' -or
+            $environment.environment_id -notmatch '^win10-11-x64-[0-9a-f]{12}$' -or
+            $environment.environment_id -ne $manifest.environment_id) { throw 'Environment identity mismatch' }
+        foreach ($entry in $environment.files) {
+            $relative = [string]$entry.path
+            $null = Inside $stage $relative
+            if ((Protected $relative) -or $environmentFiles.ContainsKey($relative) -or
+                $relative -notmatch '(^[^/]+\.dll$|^(generic|imageformats|networkinformation|platforms|styles|tls|licenses)/|^workshop-engine/runtime/|^(workshop-engine/)?assets/(ocr|echo_model)/)') {
+                throw "Invalid environment file: $relative"
+            }
+            $environmentFiles[$relative] = $entry
+        }
+    }
     $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $manifest.files) {
         $relative = [string]$entry.path
         if ((Protected $relative) -or $relative -eq 'PACKAGE.json' -or -not $seen.Add($relative)) { throw "Forbidden or duplicate manifest path: $relative" }
         $file = Inside $stage $relative
+        $reuse = ($baseVersion -or $environmentUpdate) -and -not [IO.File]::Exists($file)
+        if ($environmentUpdate) {
+            if ($environmentFiles.ContainsKey($relative)) {
+                $baseline = $environmentFiles[$relative]
+                if (-not $reuse -or $baseline.sha256 -ne $entry.sha256 -or $baseline.bytes -ne $entry.bytes) {
+                    throw "Environment file differs from the fixed baseline: $relative"
+                }
+            } elseif ($reuse) { throw "Cumulative update is missing an application file: $relative" }
+        }
+        if ($reuse) { $file = Inside $root $relative }
         if ($entry.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or -not [IO.File]::Exists($file) -or
             (New-Object IO.FileInfo $file).Length -ne $entry.bytes -or (Hash $file) -ne $entry.sha256) {
+            if ($reuse -and $environmentUpdate) { throw "环境文件缺失或不匹配：$relative。请重新解压本版本对应的环境包，再更新。" }
+            if ($reuse) { throw "Installed file needs repair: $relative; use the complete package" }
             throw "Package file verification failed: $relative"
+        }
+    }
+    if ($environmentUpdate) {
+        if (-not $seen.Contains('ENVIRONMENT.json')) { throw 'Environment metadata is not covered by the package manifest' }
+        foreach ($relative in $environmentFiles.Keys) {
+            if (-not $seen.Contains($relative)) { throw "Environment file absent from the target manifest: $relative" }
         }
     }
     if (-not $seen.Contains('OKWW-DualPC-Native-Dev.exe') -or
@@ -99,6 +154,8 @@ function Read-Manifest([string]$stage) {
 }
 try {
     $spec = [IO.File]::ReadAllText($Plan) | ConvertFrom-Json
+    $baseVersion = if ($spec.PSObject.Properties['base_version']) { ([string]$spec.base_version).TrimStart('v') } else { '' }
+    $environmentUpdate = $spec.PSObject.Properties['package_kind'] -and $spec.package_kind -eq 'environment-update'
     $root = Full ([string]$spec.root)
     $profile = Full ([string]$spec.data)
     if ($profile -eq $root) { throw 'Profile must have a separate directory' }
@@ -112,6 +169,7 @@ try {
     $stage = Join-File $job 'stage'
     $package = Join-File $job 'package.zip'
     if ($Mode -eq 'Prepare') {
+        $null = Read-InstalledManifest
         Write-Log 'Verifying download'
         if ((Hash $package) -ne $spec.sha256) { throw 'Archive checksum mismatch' }
         if (Exists $stage) { throw 'Stage already exists; retry with a new update directory' }
@@ -145,7 +203,7 @@ try {
                 [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination, $false)
             }
         } finally { $archive.Dispose() }
-        Write-Log 'Verifying package files'
+        Write-Log 'Verifying package and installed files'
         $manifest = Read-Manifest $stage
         if ($manifest.release_version.TrimStart('v') -ne $spec.release.TrimStart('v')) { throw 'Package version does not match selected release' }
         Write-Log 'READY'
@@ -157,17 +215,19 @@ try {
         if (-not $parentProcess.WaitForExit(60000)) { throw 'Application has not exited; installation cancelled' }
     }
     $installLock = [IO.File]::Open((Inside $root '.updates/install.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    $oldManifest = Read-InstalledManifest
     $manifest = Read-Manifest $stage
     if ($manifest.release_version.TrimStart('v') -ne $spec.release.TrimStart('v')) { throw 'Package version does not match selected release' }
-    $oldManifest = [IO.File]::ReadAllText((Inside $root 'PACKAGE.json')) | ConvertFrom-Json
     $files = New-Object 'System.Collections.Generic.List[object]'
     $newPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $manifest.files) {
         $relative = [string]$entry.path
         $null = $newPaths.Add($relative)
+        $source = Inside $stage $relative
+        if (($baseVersion -or $environmentUpdate) -and -not [IO.File]::Exists($source)) { continue }
         $destination = Inside $root $relative
         if ([IO.File]::Exists($destination) -and (Hash $destination) -eq $entry.sha256) { continue }
-        $files.Add([pscustomobject]@{ path=$relative; source=(Inside $stage $relative); remove=$false })
+        $files.Add([pscustomobject]@{ path=$relative; source=$source; remove=$false })
     }
     foreach ($entry in $oldManifest.files) {
         $relative = [string]$entry.path
@@ -180,6 +240,8 @@ try {
     }
     if ($oldManifest.variant -eq 'personal') {
         $manifest.variant = 'personal'
+        $manifest | Add-Member -NotePropertyName edition -NotePropertyValue 'personal' -Force
+        $manifest | Add-Member -NotePropertyName personal_profiles -NotePropertyValue 1 -Force
         foreach ($entry in $oldManifest.files) { if (Protected ([string]$entry.path)) { $manifest.files += $entry } }
     }
     $manifest | Add-Member -NotePropertyName release_version -NotePropertyValue $spec.release -Force

@@ -37,6 +37,30 @@ class UpdateTests final : public QObject {
                 {"body","- 修复队伍切换\n- 改善截图\n\n下载完整包"},{"assets",assets}};
     }
   private slots:
+    void cumulativeUpdatesDoNotDependOnTheInstalledRelease() {
+        auto item = release("v0.3.0", false, false, false);
+        const QString name = "OK-WW-DualPC-update-win10-11-x64.zip";
+        const auto base = product::github + "/releases/download/v0.3.0/";
+        item["assets"] = QJsonArray{
+            QJsonObject{{"name", name}, {"state", "uploaded"}, {"size", 100},
+                        {"browser_download_url", base + name}},
+            QJsonObject{{"name", "SHA256SUMS.txt"}, {"state", "uploaded"},
+                        {"browser_download_url", base + "SHA256SUMS.txt"}}};
+        for (const auto &current : {"0.1.0", "0.2.0-beta.17", "0.2.9"}) {
+            const auto releases = update::newerReleases({item}, current, true);
+            QCOMPARE(releases.size(), 1);
+            const auto selected = releases.first().preferred();
+            QVERIFY(selected.installable()); QVERIFY(selected.environmentUpdate());
+            QVERIFY(selected.incremental()); QCOMPARE(selected.size, 100);
+        }
+        auto assets = item["assets"].toArray();
+        assets.append(QJsonObject{{"name", "OK-WW-DualPC-update-win10-11-x64-from-0.2.9.zip"},
+                                 {"state", "uploaded"}, {"size", 50},
+                                 {"browser_download_url", base + "OK-WW-DualPC-update-win10-11-x64-from-0.2.9.zip"}});
+        item["assets"] = assets;
+        const auto selected = update::newerReleases({item}, "0.2.9", true).first().preferred();
+        QVERIFY(selected.environmentUpdate()); QCOMPARE(selected.size, 100);
+    }
     void semanticOrdering() {
         const QStringList ordered{"0.1.9","0.2.0-alpha.1","0.2.0-beta.7","v0.2.0-beta.8",
                                   "0.2.0-beta.10","0.2.0-rc.1","0.2.0","0.2.1","1.0.0"};
@@ -138,6 +162,38 @@ class UpdateTests final : public QObject {
         QTRY_COMPARE(downloaded.size(),1); QCOMPARE(failed.size(),0);
         QFile output(job.path()+"/package.zip"); QVERIFY(output.open(QIODevice::ReadOnly)); QCOMPARE(output.readAll(),package);
         QCOMPARE(requested.size(),3);
+    }
+    void incrementalAssetsMatchBaseAndVerifyTheSelectedChecksum() {
+        auto item=release("v0.2.1",false,false);
+        auto assets=item["assets"].toArray();
+        const QString patch="OK-WW-DualPC-update-win10-11-x64-from-0.2.0.zip";
+        const auto url=product::github+"/releases/download/v0.2.1/"+patch;
+        const QByteArray bytes="fixture delta";
+        const auto sha=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex();
+        assets.append(QJsonObject{{"name",patch},{"state","uploaded"},{"size",bytes.size()},
+                                  {"digest","sha256:"+QString::fromLatin1(sha)},{"browser_download_url",url}});
+        item["assets"]=assets;
+        const auto releases=update::newerReleases({item},"v0.2.0",true);
+        QVERIFY(releases.first().installable());
+        const auto selected=releases.first().preferred();
+        QVERIFY(selected.incremental());
+        QCOMPARE(selected.package,QUrl(url));
+        QCOMPARE(selected.size,bytes.size());
+        QVERIFY(!update::newerReleases({item},"0.1.9",true).first().preferred().incremental());
+        QTemporaryDir job;
+        bool requestedPatch=false;
+        update::Client client(nullptr,[&](const QNetworkRequest &request) {
+            if (request.url().path().endsWith("SHA256SUMS.txt"))
+                return new MemoryReply(request,QByteArray(64,'a')+"  OK-WW-DualPC-full.zip\n"+
+                                               sha+"  "+patch.toUtf8()+"\n");
+            requestedPatch=request.url()==QUrl(url);
+            return new MemoryReply(request,bytes);
+        });
+        QSignalSpy downloaded(&client,&update::Client::downloaded), failed(&client,&update::Client::failed);
+        client.download(selected,job.path());
+        QTRY_COMPARE(downloaded.size(),1);
+        QCOMPARE(failed.size(),0);
+        QVERIFY(requestedPatch);
     }
     void corruptDownloadsAndHttpErrorsCannotProduceAnInstallableFile() {
         for (int status:{200,429}) {

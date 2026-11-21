@@ -17,11 +17,19 @@ struct Release {
     QByteArray digest;
     qint64 size = 0;
     bool prerelease = false;
+    struct Asset {
+        QUrl url;
+        QByteArray digest;
+        qint64 size = 0;
+    } patch;
     bool installable() const;
+    bool incremental() const;
+    bool environmentUpdate() const;
+    Release preferred() const;
 };
 QList<Release> newerReleases(const QJsonArray &json, const QString &current, bool includePreview);
 QString summary(const QString &body);
-QByteArray packageChecksum(const QByteArray &text);
+QByteArray packageChecksum(const QByteArray &text, const QString &asset = QStringLiteral("OK-WW-DualPC-full.zip"));
 bool trustedDownload(const QUrl &url);
 bool installationBusy(const QString &root);
 

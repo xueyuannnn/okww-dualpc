@@ -59,6 +59,19 @@ QWidget *Window::buildAppUpdates() {
     project->setOpenExternalLinks(true);
     project->setTextInteractionFlags(Qt::TextBrowserInteraction);
     layout->addWidget(project);
+    auto profileRow = new QHBoxLayout;
+    auto profilePath = new QLabel(QDir::toNativeSeparators(data_));
+    profilePath->setTextFormat(Qt::PlainText);
+    profilePath->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    profilePath->setWordWrap(true);
+    profileRow->addWidget(profilePath, 1);
+    auto openProfile = new QPushButton("打开配置目录");
+    openProfile->setObjectName("openProfileDirectory");
+    connect(openProfile, &QPushButton::clicked, this, [this] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(data_));
+    });
+    profileRow->addWidget(openProfile);
+    layout->addLayout(profileRow);
     auto options = new QHBoxLayout;
     auto automatic = new QCheckBox("启动时自动检查更新");
     automatic->setObjectName("autoCheckAppUpdates");
@@ -70,7 +83,7 @@ QWidget *Window::buildAppUpdates() {
     options->addWidget(preview);
     options->addStretch();
     layout->addLayout(options);
-    auto hint = new QLabel("检查更新不会上传配置。确认后下载完整包，校验通过再替换；保留配置和工坊，重新打开后保持停止。");
+    auto hint = new QLabel("首次安装下载环境包和目标版本增量包；之后直接更新到所选版本，无需逐版安装。更新保留配置和工坊内容。");
     hint->setObjectName("caption");
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -123,7 +136,8 @@ void Window::showAppUpdates() {
     dialog->setObjectName("appUpdateDialog");
     dialog->setWindowTitle("软件更新 · "+product::name);
     updateDialog_=dialog;
-    const auto latest=appReleases_.first();
+    const auto full=appReleases_.first();
+    const auto latest=full.preferred();
     auto layout=classic::dialogLayout(*dialog,"发现新版本 "+latest.tag,
         "当前 "+product::releaseVersion+"。以下为各版本摘要，确认后更新至最新版本。",{760,580});
     auto notes=new QTextBrowser;
@@ -137,7 +151,9 @@ void Window::showAppUpdates() {
     }
     notes->setHtml(html);
     layout->addWidget(notes,1);
-    auto status=new QLabel("更新完成后会重新打开软件，任务和连接保持停止。更新前请结束当前游戏操作。");
+    auto status=new QLabel(QString("%1 · %2 MB。更新后会重新打开软件，任务和连接保持停止。")
+        .arg(latest.environmentUpdate() ? "累计增量包 · 以固定环境为基准" : latest.incremental() ? "增量更新包" : "完整更新包")
+        .arg(latest.size / 1048576.0, 0, 'f', 1));
     status->setObjectName("appUpdateProgressText");
     status->setWordWrap(true);
     layout->addWidget(status);
@@ -155,20 +171,26 @@ void Window::showAppUpdates() {
     auto cancel=new QPushButton("暂不更新");
     connect(cancel,&QPushButton::clicked,dialog,&QDialog::reject);
     buttons->addWidget(cancel);
+    auto fullInstall=new QPushButton(QString("改用完整包（%1 MB）").arg(full.size / 1048576.0, 0, 'f', 1));
+    fullInstall->setVisible(latest.incremental() && full.installable());
+    buttons->addWidget(fullInstall);
     auto install=new QPushButton("下载并更新");
     install->setObjectName("installAppUpdate");
     install->setProperty("primary",true);
     install->setEnabled(latest.installable());
-    if (!latest.installable()) status->setText("最新版本尚未提供完整包和校验文件，请前往 GitHub 查看。");
+    if (!latest.installable()) status->setText("最新版本尚未提供可安装的更新包或校验文件，请前往 GitHub 查看。");
     buttons->addWidget(install);
     layout->addLayout(buttons);
-    connect(install,&QPushButton::clicked,dialog,[this,dialog,latest,install,cancel,progress,status] {
+    const auto start=[this,dialog,install,cancel,progress,status](const update::Release &selected) {
+        if (updateClient_->busy() || updatePrepare_ || !install->isEnabled()) return;
         install->setEnabled(false);
         cancel->setText("取消更新");
         progress->show();
         status->setText("正在下载并校验更新包…");
-        prepareAppUpdate(latest,dialog);
-    });
+        prepareAppUpdate(selected,dialog);
+    };
+    connect(install,&QPushButton::clicked,dialog,[start,latest] { start(latest); });
+    connect(fullInstall,&QPushButton::clicked,dialog,[start,full] { start(full); });
     connect(updateClient_,&update::Client::progress,dialog,[status,progress](qint64 received,qint64 total) {
         progress->setValue(total>0?int(received*1000/total):0);
         status->setText(QString("正在下载 %1 / %2 MB").arg(received/1048576.0,0,'f',1).arg(total/1048576.0,0,'f',1));
@@ -210,7 +232,7 @@ void Window::prepareAppUpdate(const update::Release &release, QDialog *dialog) {
         if (!owner.open(QIODevice::WriteOnly) || owner.write(product::name.toUtf8())!=product::name.toUtf8().size()) fail("无法写入更新目录。");
         owner.close();
         const QStorageInfo storage(root);
-        if (storage.bytesAvailable()<release.size*3+512LL*1024*1024) fail("剩余空间不足，请至少预留完整包大小三倍加 512 MB。");
+        if (storage.bytesAvailable()<release.size*3+512LL*1024*1024) fail("剩余空间不足，请至少预留所选更新包大小三倍加 512 MB。");
         QFile script(":/updater/install.ps1");
         if (!script.open(QIODevice::ReadOnly)) fail("缺少更新组件，请前往 GitHub 下载。");
         QFile copy(job+"/install.ps1");
@@ -228,7 +250,9 @@ void Window::prepareAppUpdate(const update::Release &release, QDialog *dialog) {
                 const quint64 ticks=(quint64(created.dwHighDateTime)<<32|created.dwLowDateTime)+504911232000000000ULL;
                 writeJson(plan,{{"schema",1},{"root",QDir(root_).absolutePath()},{"data",QDir(data_).absolutePath()},
                                {"job",job},{"pid",qint64(QCoreApplication::applicationPid())},
-                               {"parent_start_ticks",QString::number(ticks)},{"sha256",sha},{"release",release.tag}});
+                               {"parent_start_ticks",QString::number(ticks)},{"sha256",sha},{"release",release.tag},
+                               {"base_version",release.incremental() && !release.environmentUpdate() ? product::releaseVersion : QString{}},
+                               {"package_kind",release.environmentUpdate() ? "environment-update" : "legacy"}});
                 auto process=new QProcess(this);
                 updatePrepare_=process;
                 hiddenProcess(*process);
@@ -241,7 +265,7 @@ void Window::prepareAppUpdate(const update::Release &release, QDialog *dialog) {
                 progress->setRange(0,0);
                 connect(process,&QProcess::readyReadStandardOutput,dialog,[process,status] {
                     const auto output=QString::fromUtf8(process->readAllStandardOutput());
-                    if (output.contains("Extracting")) status->setText("正在解压完整包…");
+                    if (output.contains("Extracting")) status->setText("正在解压更新包…");
                     if (output.contains("Verifying package")) status->setText("正在校验程序文件，完成后将重启软件…");
                 });
                 connect(process,&QProcess::errorOccurred,dialog,[this,process,status,install](auto error) {
@@ -249,10 +273,11 @@ void Window::prepareAppUpdate(const update::Release &release, QDialog *dialog) {
                     status->setText("无法启动系统更新组件："+process->errorString());
                     install->setEnabled(true); updatePrepare_=nullptr; process->deleteLater();
                 });
-                connect(process,&QProcess::finished,dialog,[this,process,status,install,plan](int code,QProcess::ExitStatus exit) {
+                connect(process,&QProcess::finished,dialog,[this,process,status,install,plan,release](int code,QProcess::ExitStatus exit) {
                     updatePrepare_=nullptr; process->deleteLater();
                     if (code || exit!=QProcess::NormalExit) {
-                        status->setText("更新包准备失败，原程序未修改。请查看 "+QFileInfo(plan).absolutePath()+"/update.log");
+                        const QString suggestion = release.incremental() ? "可改用完整包。" : "";
+                        status->setText("更新包准备失败，原程序未修改。"+suggestion+"请查看 "+QFileInfo(plan).absolutePath()+"/update.log");
                         install->setEnabled(true); return;
                     }
                     pendingUpdatePlan_=plan;

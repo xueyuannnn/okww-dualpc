@@ -6,6 +6,11 @@
 #include <algorithm>
 
 namespace okww::update {
+namespace {
+const QString fullAsset = QStringLiteral("OK-WW-DualPC-full.zip");
+const QString patchPrefix = QStringLiteral("OK-WW-DualPC-update-win10-11-x64-from-");
+const QString cumulativeAsset = QStringLiteral("OK-WW-DualPC-update-win10-11-x64.zip");
+}
 bool installationBusy(const QString &root) {
     static_assert(ERROR_ACCESS_DENIED == 5 && ERROR_SHARING_VIOLATION == 32 && ERROR_LOCK_VIOLATION == 33);
     HANDLE file = INVALID_HANDLE_VALUE;
@@ -85,6 +90,9 @@ bool trustedDownload(const QUrl &url) {
                                      })[0] != 0;
 }
 QList<Release> newerReleases(const QJsonArray &json, const QString &current, bool includePreview) {
+    const bool modern = QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows10;
+    const auto baseVersion = current.startsWith('v') ? current.mid(1) : current;
+    const auto patchName = patchPrefix + baseVersion + ".zip";
     std::optional<Version> installed, version;
     QList<Release> result;
     QSet<QString> seen;
@@ -169,13 +177,15 @@ QList<Release> newerReleases(const QJsonArray &json, const QString &current, boo
                          url == QUrl(product::legacyGithub + "/releases/download/" + tag + '/' + name);
                 break;
             case rust::WorkflowOp::UpdateAssetPackageName:
-                out[0] = name == "OK-WW-DualPC-full.zip";
+                out[0] = modern && (name == fullAsset || name == patchName || name == cumulativeAsset);
                 break;
             case rust::WorkflowOp::UpdateAssignPackageUrl:
-                release.package = url;
+                if (name == cumulativeAsset || (name == patchName && release.patch.url.fileName() != cumulativeAsset)) release.patch.url = url;
+                else if (name == fullAsset) release.package = url;
                 break;
             case rust::WorkflowOp::UpdateAssignPackageSize:
-                release.size = std::as_const(item)["size"].toInteger();
+                if (name == cumulativeAsset || (name == patchName && release.patch.url.fileName() != cumulativeAsset)) release.patch.size = std::as_const(item)["size"].toInteger();
+                else if (name == fullAsset) release.size = std::as_const(item)["size"].toInteger();
                 break;
             case rust::WorkflowOp::UpdateReadAssetDigest:
                 digest = std::as_const(item)["digest"].toString();
@@ -184,7 +194,8 @@ QList<Release> newerReleases(const QJsonArray &json, const QString &current, boo
                 out[0] = digest.startsWith("sha256:");
                 break;
             case rust::WorkflowOp::UpdateAssignPackageDigest:
-                release.digest = digest.mid(7).toLatin1().toLower();
+                if (name == cumulativeAsset || (name == patchName && release.patch.url.fileName() != cumulativeAsset)) release.patch.digest = digest.mid(7).toLatin1().toLower();
+                else if (name == fullAsset) release.digest = digest.mid(7).toLatin1().toLower();
                 break;
             case rust::WorkflowOp::UpdateAssetChecksumsName:
                 out[0] = name == "SHA256SUMS.txt";
@@ -251,7 +262,7 @@ QString summary(const QString &body) {
         });
     return result;
 }
-QByteArray packageChecksum(const QByteArray &text) {
+QByteArray packageChecksum(const QByteArray &text, const QString &asset) {
     QRegularExpression pattern;
     QRegularExpressionMatch match;
     QStringList lines;
@@ -261,7 +272,8 @@ QByteArray packageChecksum(const QByteArray &text) {
         [&](rust::WorkflowOp op, const double *a, double *out) {
             switch (op) {
             case rust::WorkflowOp::UpdateCreateChecksumPattern:
-                pattern = QRegularExpression(R"(^([0-9A-Fa-f]{64})\s+\*?OK-WW-DualPC-full\.zip$)");
+                pattern = QRegularExpression(R"(^([0-9A-Fa-f]{64})\s+\*?)" +
+                                             QRegularExpression::escape(asset) + '$');
                 break;
             case rust::WorkflowOp::UpdateSplitChecksumText:
                 lines = QString::fromUtf8(text).split('\n');
@@ -279,13 +291,28 @@ QByteArray packageChecksum(const QByteArray &text) {
                 found = match.captured(1).toLatin1().toLower();
                 break;
             case rust::WorkflowOp::UpdatePolicyFailure:
-                throw std::runtime_error(int(a[0]) == 1 ? "校验文件包含重复的完整包记录"
-                                                        : "发布版本缺少完整包 SHA256 校验值");
+                if (asset == fullAsset)
+                    throw std::runtime_error(int(a[0]) == 1 ? "校验文件包含重复的完整包记录"
+                                                            : "发布版本缺少完整包 SHA256 校验值");
+                throw std::runtime_error(int(a[0]) == 1 ? "校验文件包含重复的增量包记录"
+                                                        : "发布版本缺少增量包 SHA256 校验值");
             default:
                 throw std::runtime_error("Rust 更新校验值宿主无效");
             }
         });
     return found;
+}
+bool Release::environmentUpdate() const { return package.fileName() == cumulativeAsset; }
+bool Release::incremental() const { return environmentUpdate() || package.fileName().startsWith(patchPrefix); }
+Release Release::preferred() const {
+    if (patch.url.isEmpty() || patch.size <= 0 || checksums.isEmpty() ||
+        (installable() && patch.size >= size))
+        return *this;
+    auto selected = *this;
+    selected.package = patch.url;
+    selected.digest = patch.digest;
+    selected.size = patch.size;
+    return selected;
 }
 bool Release::installable() const {
     const std::array<double, 1> args{double(size)};
@@ -571,7 +598,7 @@ void Client::runUpdate(int method, UpdateCall call) {
                     [this] { runUpdate(int(rust::WorkflowMethod::UpdateClientChecksumReply), {}); });
                 break;
             case rust::WorkflowOp::UpdateClientReadExpectedChecksum:
-                expected_ = packageChecksum(buffer_);
+                expected_ = packageChecksum(buffer_, selected_.package.fileName());
                 break;
             case rust::WorkflowOp::UpdateClientSelectedDigestEmpty:
                 out[0] = selected_.digest.isEmpty();

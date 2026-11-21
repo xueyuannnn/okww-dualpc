@@ -4,9 +4,21 @@
 
 双机模式通过采集卡读取画面、KMBox Net 发送键鼠操作；也可使用本机 DXGI / Win32 截图和 SendInput 输入。业务内核使用 Rust，负责内置任务、角色连招、识别策略和设备控制；C++ 保留 Qt 界面及底层 SDK 适配，工坊、通用脚本和活动流程使用独立 Python 环境。
 
-基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.17**，支持 Windows 10／11 x64。
+基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.18**，支持 Windows 10／11 x64。
 
-[下载完整包](https://github.com/xueyuannnn/okww-dualpc/releases) · [使用说明](docs/usage.md) · [问题反馈](https://github.com/xueyuannnn/okww-dualpc/issues)
+## 下载与安装
+
+| 下载 | 用途 |
+| --- | --- |
+| **[① 固定环境包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/environment-win10-11-x64-67a1e8aae098)** · 约 625 MB | 首次安装下载一次，包含运行库、Python 和识别模型 |
+| **[② beta.18 累计增量包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/v0.2.0-beta.18)** · 约 21 MB | 程序、脚本和界面资源；每个版本只需安装这一份 |
+| [其他版本](https://github.com/xueyuannnn/okww-dualpc/releases) · [使用说明](docs/usage.md) · [问题反馈](https://github.com/xueyuannnn/okww-dualpc/issues) | 源码和校验文件在对应版本的 Assets 中 |
+
+**首次安装**：下载①和②，将两个 ZIP 内的 `OKWW-DualPC-full` 文件夹合并解压到同一个位置，运行其中的 `OKWW-DualPC-Native-Dev.exe`，无需另装 Python。
+
+**已有软件**：从托盘退出，备份 `native-full-data`，再将增量包中 `OKWW-DualPC-full` **里面的全部内容**复制到旧版 EXE 所在目录，替换同名文件。不要只复制 ZIP，也不要多套一层文件夹。原 beta.17 全量包可直接覆盖本次增量；之后可在「关于 → 检查更新」更新。
+
+增量包以固定环境为基准，可跨版本安装，不需要逐版更新。环境标识为 `win10-11-x64-67a1e8aae098`；运行库或模型变化时会另发环境包，并在版本说明中注明。每个版本的发布页都附有对应环境链接。
 
 ![任务界面](docs/images/tasks.png)
 
@@ -23,13 +35,11 @@
 - **脚本与录制**：编写 Python 任务，录制预览区域内的键鼠操作，设置次数或持续循环，导入导出 `.okscript` 脚本包；提供中文动作模板和图片标注工具。
 - **任务管理**：图形化参数、运行阶段与进度、定时计划、实时触发、日志、通知和已保存账号的多账号日常。可为不同账号设置独立每日参数，体力魔方按账号每天最多 4 个。实时触发的开关与参数修改后自动保存。
 - **画面预览**：等比显示、独立窗口、窗口置顶；预览帧率可选 30 / 60 / 120 / 144 / 165 / 240 / 无限制。
-- **软件更新**：「关于」页可直达本项目 GitHub，联网检查新版本并查看摘要；确认后自动下载、校验和更新，保留现有配置与工坊。
+- **软件更新**：「关于」页可检查 GitHub 新版本并查看摘要。下载匹配固定环境的累计增量包，在原目录更新并保留个人配置。也可在此打开当前使用的配置目录。
 
 ## 运行方法
 
-下载 `OK-WW-DualPC-full.zip`，完整解压后运行 `OKWW-DualPC-Native-Dev.exe`。运行库、识别模型和工坊环境都在包内，不需要另装 Python。
-
-GitHub 提供的是普通包，不含个人配置。EXE 文件名是更新器沿用的固定入口，个人包使用同一名称；首次运行普通包时会创建新的配置目录。
+按上方步骤合并环境包与增量包后运行。GitHub 提供的是普通包，不含个人配置；首次启动会创建 `native-full-data`。源码 ZIP 用于开发，不能直接运行。
 
 1. 在游戏机打开鸣潮，确认采集卡能收到游戏画面。
 2. 打开「双机设置」，点击「检测设备与参数」，选择采集卡、分辨率和帧率，采集格式固定为 NV12。

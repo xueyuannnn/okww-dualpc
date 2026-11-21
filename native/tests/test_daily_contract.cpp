@@ -95,6 +95,108 @@ QJsonObject observation(int scene, bool rust) {
 class DailyContracts : public QObject {
     Q_OBJECT
   private slots:
+    void streamedPageEvidence_data() {
+        QTest::addColumn<QString>("heading");
+        QTest::addColumn<QString>("label");
+        QTest::addColumn<int>("milestones");
+        QTest::addColumn<bool>("shiftSlots");
+        QTest::addColumn<bool>("accepted");
+        QTest::newRow("spaced-label") << "活 跃 度" << "活 跃 度" << 0 << false << true;
+        QTest::newRow("blurred-label-three-anchors") << "活跃度" << "活联馆" << 3 << false << true;
+        QTest::newRow("blurred-label-five-anchors") << "活跃度" << "" << 5 << false << true;
+        QTest::newRow("missing-heading") << "游历值" << "" << 5 << false << false;
+        QTest::newRow("two-anchors-insufficient") << "活跃度" << "活联馆" << 2 << false << false;
+        QTest::newRow("numbers-in-wrong-slots") << "活跃度" << "" << 5 << true << false;
+    }
+    void streamedPageEvidence() {
+        QFETCH(QString, heading);
+        QFETCH(QString, label);
+        QFETCH(int, milestones);
+        QFETCH(bool, shiftSlots);
+        QFETCH(bool, accepted);
+        Scenes s({640, 360});
+        s.c.streamedCapture = true;
+        s.words["blank"] = {s.word(heading, .15, .12), s.word(label, .19, .90, .12),
+                            s.word("20", .2, .85, .035)};
+        for (int i = 0; i < milestones; ++i)
+            s.words["blank"].append(s.word(QString::number(((i + int(shiftSlots)) % 5 + 1) * 20),
+                                                .35 + i * .133, .90, .025));
+        s.scaledText = [](const cv::Mat &, QRect) { return QVector<TextLine>{}; };
+        s.c.refresh();
+        QJsonObject detail;
+        const auto result = observeDailyProgress(s.c, &detail);
+        QCOMPARE(detail["page_confirmed"].toBool(), accepted);
+        QCOMPARE(result.points, accepted ? 20 : -1);
+        QVERIFY(s.events.empty());
+    }
+    void streamedCounterCropRejectsAmbiguousNumbers_data() {
+        QTest::addColumn<QStringList>("numbers");
+        QTest::addColumn<int>("expected");
+        QTest::newRow("single-zero") << QStringList{"0"} << 0;
+        QTest::newRow("single-value") << QStringList{"60"} << 60;
+        QTest::newRow("full-width-digits") << QStringList{"６０"} << 60;
+        QTest::newRow("conflicting-values") << QStringList{"20", "60"} << -1;
+        QTest::newRow("outside-activity-range") << QStringList{"240"} << -1;
+    }
+    void streamedCounterCropRejectsAmbiguousNumbers() {
+        QFETCH(QStringList, numbers);
+        QFETCH(int, expected);
+        Scenes s({640, 360});
+        s.c.streamedCapture = true;
+        s.words["blank"] = {s.word("活跃度", .15, .12), s.word("活跃度", .19, .90, .12)};
+        int croppedReads = 0;
+        s.scaledText = [&](const cv::Mat &, QRect) {
+            ++croppedReads;
+            QVector<TextLine> lines;
+            for (int i = 0; i < numbers.size(); ++i)
+                lines.append({numbers[i], {8 + i * 38, 8, 30, 20}, .95});
+            return lines;
+        };
+        s.c.refresh();
+        QJsonObject detail;
+        QCOMPARE(observeDailyProgress(s.c, &detail).points, expected);
+        QCOMPARE(croppedReads, 1);
+        QVERIFY(detail["recognition_recovery"].toObject().contains("counter"));
+        QVERIFY(s.events.empty());
+    }
+    void streamedSplitLabel() {
+        Scenes s({640, 360});
+        s.c.streamedCapture = true;
+        s.words["blank"] = {s.word("活", .15, .12, .025), s.word("跃度", .18, .12, .05),
+                            s.word("活跃度", .19, .90, .12), s.word("20", .2, .85, .035)};
+        s.c.refresh();
+        QCOMPARE(observeDailyProgress(s.c).points, 20);
+    }
+    void remoteOcrJitterCannotAcknowledgeAnUnreceivedClaim() {
+        const auto original = daily_actions_test::trace<reference_daily::Daily>(0, 81, true);
+        const auto current = daily_actions_test::trace<Daily>(0, 81, true);
+        QCOMPARE(original["objective_claims"].toInt(), 12);
+        QVERIFY(original["error"].toString().contains("领取次数异常"));
+        QCOMPARE(current["objective_claims"].toInt(), 1);
+        QVERIFY(current["error"].toString().contains("领取后页面未更新"));
+    }
+    void delayedRemoteAcknowledgementContinuesWithoutReclicking() {
+        const auto current = daily_actions_test::trace<Daily>(0, 81, true, 1.6);
+        QCOMPARE(current["objective_claims"].toInt(), 1);
+        QCOMPARE(current["error"].toString(), QString{});
+        QCOMPARE(current["points"].toInt(), 80);
+    }
+    void oneFrameMissingButtonCannotAcknowledgeAClaim() {
+        const auto current = daily_actions_test::trace<Daily>(0, 81, false, 0, 1);
+        QCOMPARE(current["objective_claims"].toInt(), 1);
+        QVERIFY(current["error"].toString().contains("领取后页面未更新"));
+    }
+    void delayedClaimAtActivityCapNeedsStableButtonConfirmation() {
+        const auto current = daily_actions_test::trace<Daily>(0, 83, false, 1.6);
+        QCOMPARE(current["objective_claims"].toInt(), 1);
+        QCOMPARE(current["points"].toInt(), 100);
+        QCOMPARE(current["error"].toString(), QString{});
+    }
+    void regressedCounterCannotAcknowledgeAClaim() {
+        const auto current = daily_actions_test::trace<Daily>(0, 81, false, 0, 2);
+        QCOMPARE(current["objective_claims"].toInt(), 1);
+        QVERIFY(current["error"].toString().contains("领取后页面未更新"));
+    }
     void missingStaminaRecoversOnlyNavigationAndNeverRepeatsMaterialActions() {
         for(int scenario=0;scenario<3;++scenario) {
             int reads=0,opens=0,retries=0,cubes=0,farms=0;
@@ -309,8 +411,30 @@ class DailyContracts : public QObject {
         QFETCH(int, operation);
         QFETCH(int, scene);
         try {
-            const auto expected = daily_actions_test::trace<reference_daily::Daily>(operation, scene);
-            const auto actual = daily_actions_test::trace<Daily>(operation, scene);
+            auto expected = daily_actions_test::trace<reference_daily::Daily>(operation, scene);
+            auto actual = daily_actions_test::trace<Daily>(operation, scene);
+            if (operation == 0 && (scene & 1) && (scene & 16) && !(scene & 64) && !(scene & 32) &&
+                scene % 6 == 5 && scene % 13 != 0) {
+                // At 100 points, a successful claim cannot raise activity.
+                // Confirm the button disappearance on a second delayed read.
+                QCOMPARE(actual["objective_claims"].toInt(), 1);
+                QCOMPARE(actual["points"].toInt(), 100);
+                QCOMPARE(actual["reads"].toArray().size(), expected["reads"].toArray().size() + 6);
+                QVERIFY(std::abs(actual["time"].toDouble() - expected["time"].toDouble() - .25) < 1e-6);
+                actual.remove("reads"); expected.remove("reads");
+                actual.remove("time"); expected.remove("time");
+                QVERIFY2(actual == expected, qPrintable(firstDifference(actual, expected)));
+                return;
+            }
+            if (operation == 0 && (scene & 1) && (scene & 16) && (scene & 64) && !(scene & 32) && scene % 13 != 0) {
+                // Missing input now waits for confirmation without replaying
+                // the button. The old oracle uses a fixed 700 ms second read.
+                QCOMPARE(actual["objective_claims"].toInt(), 1);
+                QVERIFY(actual["error"].toString().contains("领取后页面未更新"));
+                QVERIFY(actual["observation"].toObject().contains("claim_confirmation"));
+                QCOMPARE(actual["spent"], expected["spent"]);
+                return;
+            }
             QVERIFY2(actual == expected, qPrintable(firstDifference(actual, expected)));
         } catch (const std::exception &e) {
             QFAIL(qPrintable(errorText(e)));

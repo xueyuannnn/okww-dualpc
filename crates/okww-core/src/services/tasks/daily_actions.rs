@@ -86,11 +86,28 @@ impl DailyPage<'_> {
             self.host.action(Op::ClickDailyObjective, &[0.7])?;
             let mut next = self.read()?;
             if self.host.flag(Op::DailyObjectivesUnchanged, &[])? {
-                self.host.action(Op::Sleep, &[0.7])?;
-                next = self.read()?;
-                if self.host.flag(Op::DailyObjectivesUnchanged, &[])? {
+                let host = self.host;
+                // A remote stream may acknowledge input later than the local
+                // capture. Poll without clicking or reopening the guide.
+                if !host.wait_for_interval(
+                    || {
+                        host.action(Op::ReadDailyPage, &[])?;
+                        host.action(Op::AppendDailyPageObservation, &[])?;
+                        if host.scalar(Op::DailyObservationCount, &[])? > 6. {
+                            host.action(Op::RemoveFirstDailyObservation, &[])?;
+                        }
+                        let observed = host.daily_load()?;
+                        Ok(
+                            observed.points >= 0
+                                && !host.flag(Op::DailyObjectivesUnchanged, &[])?,
+                        )
+                    },
+                    3.,
+                    0.25,
+                )? {
                     self.host.action(Op::DailyActionFailure, &[2.])?;
                 }
+                next = host.daily_load()?;
             }
             if next.stamina.is_none() {
                 next.stamina = value.stamina;

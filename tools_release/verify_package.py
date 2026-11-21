@@ -11,7 +11,7 @@ import zipfile
 def verify(archive: Path) -> dict:
     with zipfile.ZipFile(archive) as zipped:
         names = [entry.filename for entry in zipped.infolist() if not entry.is_dir()]
-        if len(names) != len(set(names)):
+        if len(names) != len({name.casefold() for name in names}):
             raise RuntimeError("Duplicate archive entries")
         roots = set()
         for name in names:
@@ -31,14 +31,37 @@ def verify(archive: Path) -> dict:
         if len(roots) != 1:
             raise RuntimeError("Expected one top-level package directory")
         prefix = roots.pop() + "/"
-        manifest_name = next((prefix + n for n in ("PACKAGE.json", "SOURCE-MANIFEST.json")
+        manifest_name = next((prefix + n for n in ("PACKAGE.json", "SOURCE-MANIFEST.json", "ENVIRONMENT.json")
                               if prefix + n in names), None)
         if not manifest_name:
             raise RuntimeError("Package manifest missing")
         manifest = json.loads(zipped.read(manifest_name))
         expected = {manifest_name}
+        environment = {}
+        cumulative = manifest.get('package_kind') == 'environment-update'
+        if cumulative:
+            from prepare_environment import checked_entries, frozen
+            baseline = json.loads(zipped.read(prefix + 'ENVIRONMENT.json'))
+            if (baseline.get('variant') != 'environment' or baseline.get('schema') != 1 or
+                    baseline.get('platform') != 'win10-11-x64' or
+                    baseline.get('environment_id') != manifest.get('environment_id')):
+                raise RuntimeError('Environment identity mismatch')
+            environment = checked_entries(baseline)
+            if any(not frozen(e['path']) for e in environment.values()):
+                raise RuntimeError('Non-runtime file in environment')
+        listed = set()
         for entry in manifest["files"]:
+            relative = PurePosixPath(entry['path'])
+            if (relative.is_absolute() or '..' in relative.parts or '\\' in entry['path'] or ':' in entry['path'] or
+                    entry['path'].casefold() in listed):
+                raise RuntimeError('Unsafe or duplicate manifest entry')
+            listed.add(entry['path'].casefold())
             name = prefix + entry["path"].replace("\\", "/")
+            baseline = environment.get(entry['path'].casefold())
+            if baseline:
+                if entry != baseline or name in names:
+                    raise RuntimeError('Cumulative update changes a frozen runtime file')
+                continue
             expected.add(name)
             with zipped.open(name) as stream:
                 actual = hashlib.file_digest(stream, "sha256").hexdigest()
@@ -46,7 +69,10 @@ def verify(archive: Path) -> dict:
                 raise RuntimeError("File hash or size mismatch: " + name)
         if set(names) != expected:
             raise RuntimeError("Manifest does not cover every archive entry")
-        return {"archive": archive.name, "files": len(names), "ok": True, "profiles": 0}
+        if cumulative and not set(environment) <= listed:
+            raise RuntimeError('Environment file missing from target manifest')
+        return {"archive": archive.name, "files": len(names), "ok": True, "profiles": 0,
+                "cumulative": cumulative, "environment_id": manifest.get('environment_id')}
 
 
 def main() -> None:

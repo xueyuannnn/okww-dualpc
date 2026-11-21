@@ -66,7 +66,8 @@ inline EchoDetector &detector() {
     static EchoDetector value(QString(OKWW_SOURCE_ROOT) + "/assets/echo_model/echo.onnx");
     return value;
 }
-template <class DailyType> QJsonObject trace(int operation, int scene) {
+template <class DailyType> QJsonObject trace(int operation, int scene, bool jitter = false,
+                                           double acknowledgementDelay = 0, int acknowledgementNoise = 0) {
     Scenes s({640, 360});
     s.profile.set("Monthly Card Config", "Check Monthly Card", false);
     s.profile.set("Task Recovery", "Recovery Retry Limit", 1);
@@ -96,7 +97,8 @@ template <class DailyType> QJsonObject trace(int operation, int scene) {
     s.frame("menu", {});
     s.frame("mail", {});
     int points = operation == 7 || operation == 5 ? 100 : (scene % 6) * 20;
-    int claimed = 0, readings = 0, scroll = 0, rewardPopups = 0, claims = 0;
+    int claimed = 0, readings = 0, scroll = 0, rewardPopups = 0, claims = 0, jitterReads = 0, noisyReads = 0;
+    double acknowledgeAt = -1;
     const auto update = [&] {
         QVector<TextLine> words{s.word("活跃度", .15, .12), s.word("活跃度", .195, .91),
                                 s.word(QString::number(points), .2, .85, .035)};
@@ -114,6 +116,16 @@ template <class DailyType> QJsonObject trace(int operation, int scene) {
         s.words["pass"] = {s.word("50", .23, .16, .03)};
     };
     update();
+    if (acknowledgementDelay > 0) {
+        s.clock.tick = [&] {
+            if (acknowledgeAt >= 0 && s.clock.time >= acknowledgeAt) {
+                acknowledgeAt = -1;
+                ++claimed;
+                points = std::min(100, points + 20);
+                update();
+            }
+        };
+    }
     QJsonArray notes, diagnostics, reads, flows;
     s.c.info = [&](QString k, QString v) { notes.append(QJsonArray{k, v}); };
     s.c.notify = [&](QString k, QString v, bool error) { notes.append(QJsonArray{k, v, error}); };
@@ -126,6 +138,20 @@ template <class DailyType> QJsonObject trace(int operation, int scene) {
         flows.append(patch);
     };
     s.textOverride = [&](QRect area, QVector<TextLine> words) {
+        if (claims > 0 && acknowledgementNoise == 1 && area.contains(gamePoint(s.size, .84, .4)) && ++noisyReads == 1)
+            words.erase(std::remove_if(words.begin(), words.end(), [](const auto &line) { return line.text == "领取"; }), words.end());
+        if (claims > 0 && acknowledgementNoise == 2)
+            for (auto &word : words)
+                if (word.text == "60") word.text = "0";
+        if (jitter) {
+            ++jitterReads;
+            for (auto &word : words) {
+                word.confidence = .85 + (jitterReads % 13) * .01;
+                word.box.translate(jitterReads % 2, 0);
+            }
+            if (area.contains(gamePoint(s.size, .4, .6)))
+                words.append(s.word("compression-noise-" + QString::number(jitterReads), .35, .59, .2));
+        }
         reads.append(QJsonArray{s.scene, area.x(), area.y(), area.width(), area.height()});
         if (operation == 0 && scene % 11 == 0 && s.scene == "book" && area.y() > 280 && ++readings < 3)
             words.erase(std::remove_if(words.begin(), words.end(),
@@ -159,6 +185,8 @@ template <class DailyType> QJsonObject trace(int operation, int scene) {
             if (operation == 0 && s.pointer.x() > .8 * s.size.width() &&
                 s.pointer.y() < .79 * s.size.height()) {
                 ++claims;
+                if (acknowledgementDelay > 0 && acknowledgeAt < 0 && !claimed)
+                    acknowledgeAt = s.clock.time + acknowledgementDelay;
                 if (!(scene & 64)) {
                     ++claimed;
                     points = std::min(100, points + 20);
@@ -176,6 +204,7 @@ template <class DailyType> QJsonObject trace(int operation, int scene) {
     CombatSession combat(s.c, s.root, s.directory.path());
     DailyType daily(s.c, combat, detector(), s.root, s.directory.path());
     auto out = DailyContractAccess::exercise(daily, operation, scene);
+    out["objective_claims"] = claims;
     // Timing history uses wall clocks. Compare the logical flow fields only.
     QJsonArray events;
     for (auto e : s.events)

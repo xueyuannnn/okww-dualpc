@@ -21,3 +21,11 @@
 - Build and validate packages locally first. After every completed build, provide the version and clickable absolute paths to the standard package, personal package and installed executable when available.
 - Wait for an explicit publication command for that build before pushing to GitHub, creating or pushing tags, uploading release assets, or publishing a release. Approval for an earlier build does not authorize publication of a later build.
 - Keep existing published versions unchanged unless the user explicitly requests a change or removal.
+
+## Environment and cumulative updates
+
+- Default public delivery is a fixed environment archive plus one cumulative application archive per version. Compare against the environment, not the preceding application release; users must be able to skip intermediate releases.
+- Use `tools_release/prepare_environment.py`. Keep runtime dependencies and models immutable within an environment ID. Dependency changes require a new environment ID and archive; never replace a published environment in place.
+- Keep the matching environment link first in the README download section. Version releases provide the cumulative application archive, source archive and checksums. Do not put the complete source tree or private profiles into application updates.
+- Publish the immutable environment in its own Release. Keep its download link at the top of the README and in every matching application release. Do not mark an environment release as the application's Latest. Verify both public release asset hashes and download links before reporting publication complete.
+- Test version jumps, reverted application files, removed managed files, mismatched environments, preserved profiles and rollback. Keep personal archives local. Publication still requires an explicit command for that build.

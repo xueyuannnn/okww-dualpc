@@ -162,6 +162,7 @@ int main(int argc, char **argv) {
                     },execution);
                 TaskContext context(execution,input,templates,profile,[&] { return image; },
                     [&](const auto &frame,auto area,double threshold) { return ocr->read(frame,area,threshold); });
+                context.streamedCapture = parser.isSet("streamed");
                 context.refresh();
                 QJsonObject observation;
                 const auto progress=observeDailyProgress(context,&observation);

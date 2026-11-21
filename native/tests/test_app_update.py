@@ -59,23 +59,132 @@ class AppUpdateTests(unittest.TestCase):
     def entry(name, data):
         return {'path': name, 'bytes': len(data), 'sha256': sha(data)}
 
-    def archive(self, extra=None, raw=None):
+    def archive(self, extra=None, raw=None, reused=None, platform=None):
         files = {'OKWW-DualPC-Native-Dev.exe': b'new app',
                  'workshop-engine/runtime/python.exe': b'portable runtime',
                  'source/README.md': b'new source'}
         files.update(extra or {})
         manifest = {'variant': 'full', 'runtime': 'C++ + Python workshop', 'core_language': 'Rust',
                     'frontend': 'Qt6 Widgets', 'release_version': '0.2.0-beta.8',
-                    'exe_sha256': sha(b'new app'), 'files': [self.entry(k, v) for k, v in files.items()]}
+                    'exe_sha256': sha(b'new app'), 'files': [self.entry(k, v) for k, v in (files | (reused or {})).items()]}
+        if platform:
+            manifest['platform'] = platform
         with zipfile.ZipFile(self.job / 'package.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
             for key, data in files.items():
-                archive.writestr('OKWW-DualPC-full/' + key, data)
+                if key not in (reused or {}):
+                    archive.writestr('OKWW-DualPC-full/' + key, data)
             archive.writestr('OKWW-DualPC-full/PACKAGE.json', json.dumps(manifest))
             for key, data in raw or []:
                 archive.writestr(key, data)
         self.write_json(self.plan, {'schema': 1, 'root': str(self.root), 'data': str(self.profile.parents[1]),
                                    'job': str(self.job), 'pid': 2147483647, 'parent_start_ticks': '0',
-                                   'sha256': sha((self.job / 'package.zip').read_bytes()), 'release': 'v0.2.0-beta.8'})
+                                   'sha256': sha((self.job / 'package.zip').read_bytes()), 'release': 'v0.2.0-beta.8',
+                                   'base_version': '0.2.0-beta.7' if reused else ''})
+
+    def incremental_archive(self):
+        python = self.root / 'workshop-engine/runtime/python.exe'
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b'portable runtime')
+        manifest = self.root / 'PACKAGE.json'
+        installed = json.loads(manifest.read_text())
+        installed['release_version'] = 'v0.2.0-beta.7'
+        installed['files'].append(self.entry('workshop-engine/runtime/python.exe', b'portable runtime'))
+        self.write_json(manifest, installed)
+        self.archive(reused={'workshop-engine/runtime/python.exe': b'portable runtime'},
+                     platform='win10-11-x64')
+        return python
+
+    def test_delta_reuses_environment_and_preserves_the_profile(self):
+        python = self.incremental_archive()
+        before = python.stat().st_mtime_ns
+        self.run_installer('Prepare')
+        self.assertFalse((self.job / 'stage/workshop-engine/runtime/python.exe').exists())
+        self.run_installer('Install')
+        self.assertEqual(self.exe.read_bytes(), b'new app')
+        self.assertEqual(self.profile.read_bytes(), b'private config')
+        self.assertEqual(python.stat().st_mtime_ns, before)
+        self.assertFalse((self.root / 'obsolete.py').exists())
+
+    def cumulative_archive(self, installed_version='0.1.0'):
+        python = self.root / 'workshop-engine/runtime/python.exe'
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b'portable runtime')
+        environment = dict(schema=1, variant='environment', platform='win10-11-x64',
+                           environment_id='win10-11-x64-' + 'a' * 12,
+                           files=[self.entry('workshop-engine/runtime/python.exe', b'portable runtime')])
+        installed = json.loads((self.root / 'PACKAGE.json').read_text())
+        installed['release_version'] = installed_version
+        installed['files'].append(environment['files'][0])
+        self.write_json(self.root / 'PACKAGE.json', installed)
+        self.archive(extra={'ENVIRONMENT.json': json.dumps(environment).encode()},
+                     reused={'workshop-engine/runtime/python.exe': b'portable runtime'}, platform='win10-11-x64')
+        with zipfile.ZipFile(self.job / 'package.zip') as zipped:
+            contents = {n: zipped.read(n) for n in zipped.namelist()}
+        key = 'OKWW-DualPC-full/PACKAGE.json'
+        manifest = json.loads(contents[key])
+        manifest.update(package_kind='environment-update', environment_id=environment['environment_id'])
+        contents[key] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(self.job / 'package.zip', 'w') as zipped:
+            for n, b in contents.items():
+                zipped.writestr(n, b)
+        plan = json.loads(self.plan.read_text())
+        plan.update(base_version='', package_kind='environment-update', sha256=sha((self.job / 'package.zip').read_bytes()))
+        self.write_json(self.plan, plan)
+        return python
+
+    def test_cumulative_update_jumps_versions_and_restores_current_application(self):
+        self.cumulative_archive('0.1.0-beta.1')
+        self.run_installer('Prepare')
+        self.run_installer('Install')
+        self.assertEqual(self.exe.read_bytes(), b'new app')
+        self.assertEqual(self.profile.read_bytes(), b'private config')
+        self.assertFalse((self.root / 'obsolete.py').exists())
+
+    def test_cumulative_update_refuses_a_damaged_environment(self):
+        python = self.cumulative_archive()
+        python.write_bytes(b'bad runtime')
+        self.run_installer('Prepare', False, '环境文件缺失或不匹配')
+        self.assert_original()
+
+    def test_cumulative_update_checks_environment_again_before_install(self):
+        python = self.cumulative_archive('0.2.0-beta.7')
+        self.run_installer('Prepare')
+        python.write_bytes(b'bad runtime')
+        self.run_installer('Install', False, '环境文件缺失或不匹配')
+        self.assert_original()
+
+    def test_cumulative_update_cannot_omit_an_unchanged_application_file(self):
+        self.cumulative_archive()
+        path = self.job / 'package.zip'
+        with zipfile.ZipFile(path) as zipped:
+            contents = {n: zipped.read(n) for n in zipped.namelist() if n != 'OKWW-DualPC-full/source/README.md'}
+        (self.root / 'source').mkdir()
+        (self.root / 'source/README.md').write_bytes(b'new source')
+        with zipfile.ZipFile(path, 'w') as zipped:
+            for n, b in contents.items(): zipped.writestr(n, b)
+        plan = json.loads(self.plan.read_text()); plan['sha256'] = sha(path.read_bytes()); self.write_json(self.plan, plan)
+        self.run_installer('Prepare', False, 'missing an application file')
+        self.assert_original()
+
+    def test_delta_rechecks_reused_dependencies_after_prepare(self):
+        python = self.incremental_archive()
+        self.run_installer('Prepare')
+        python.write_bytes(b'changed')
+        self.run_installer('Install', False, 'Installed file needs repair')
+        self.assert_original()
+
+    def test_delta_refuses_a_wrong_base_version(self):
+        self.incremental_archive()
+        spec = json.loads(self.plan.read_text())
+        spec['base_version'] = '0.2.0-beta.6'
+        self.write_json(self.plan, spec)
+        self.run_installer('Prepare', False, 'matching installed version')
+        self.assert_original()
+
+    def test_modern_installer_rejects_legacy_target_assets(self):
+        self.archive(platform='win7-x64')
+        self.run_installer('Prepare', False, 'Package platform does not match')
+        self.assert_original()
 
     def run_installer(self, mode, success=True, expected=None):
         process = subprocess.run([
@@ -130,6 +239,8 @@ class AppUpdateTests(unittest.TestCase):
         self.assertFalse((self.root / 'obsolete.py').exists())
         manifest = json.loads((self.root / 'PACKAGE.json').read_text(encoding='utf-8-sig'))
         self.assertEqual(manifest['variant'], 'personal')
+        self.assertEqual(manifest['personal_profiles'], 1)
+        self.assertEqual(manifest['edition'], 'personal')
         self.assertEqual(manifest['release_version'], 'v0.2.0-beta.8')
         self.assertTrue(json.loads((self.job / 'result.json').read_text())['ok'])
         self.assertFalse((self.job / 'package.zip').exists())

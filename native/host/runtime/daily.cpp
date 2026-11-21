@@ -7,6 +7,63 @@ const QString additions = "Additional Tasks to Run After Daily Task";
 const QString weekly = "Check Weekly Garden", allNests = "Auto Farm all Nightmare Nest",
               merge = "Merge Echo If discarded > 1000", echo = "Teleport and Farm 4C Echo",
               materials = "4C Echo and Advanced Skill Material";
+QString dailyText(QString text) {
+    text = text.normalized(QString::NormalizationForm_KC).toCaseFolded();
+    text.remove(QRegularExpression("\\s+"));
+    return text;
+}
+bool dailyActivityLabel(QVector<TextLine> lines) {
+    const auto matches = [](const QString &text) {
+        return text == "活跃度" || text == "活躍度" || text == "dailyactivity" || text == "activity" ||
+               text == "activitypoint" || text == "activitypoints";
+    };
+    for (auto &line : lines) {
+        line.text = dailyText(line.text);
+        if (matches(line.text)) return true;
+    }
+    std::sort(lines.begin(), lines.end(), [](const auto &a, const auto &b) { return a.box.x() < b.box.x(); });
+    // Some remote encoders split a label into several OCR boxes. Only join
+    // adjacent fragments on the same row; never join text from separate tabs.
+    for (int i = 0; i < lines.size(); ++i) {
+        auto text = lines[i].text;
+        auto previous = lines[i].box;
+        for (int j = i + 1; j < lines.size() && j <= i + 3; ++j) {
+            const auto &box = lines[j].box;
+            const auto height = std::max(previous.height(), box.height());
+            if (std::abs(box.center().y() - previous.center().y()) > height * .5 ||
+                box.left() - previous.right() > height || box.left() <= previous.left()) break;
+            text += lines[j].text;
+            if (matches(text)) return true;
+            previous = box;
+        }
+    }
+    return false;
+}
+int dailyRewardAnchors(const QVector<TextLine> &lines, const cv::Mat &frame) {
+    QSet<int> found;
+    for (const auto &line : lines) {
+        const auto text = dailyText(line.text);
+        for (int slot = 0; slot < 5; ++slot) {
+            if (text != QString::number((slot + 1) * 20)) continue;
+            // Match both the value and its slot, away from the activity counter
+            // and performance overlays. Three independent milestones are needed.
+            const double x = .363 + slot * .133;
+            if (gameBox(frame, x - .03, .875, x + .03, .96).contains(line.center().toPoint()))
+                found.insert(slot);
+        }
+    }
+    return found.size();
+}
+QJsonObject dailyClaimState(const QJsonObject &observation, const DailyProgress &progress) {
+    int claimable = 0;
+    for (const auto &value : observation.value("objective_lines").toArray()) {
+        const auto text = dailyText(value.toObject().value("text").toString());
+        if (text == "领取" || text == "領取" || text == "claim" || text == "collect") ++claimable;
+    }
+    // OCR box coordinates, ordering and confidence can jitter on an unchanged
+    // remote frame. Unrelated objective text can also fluctuate under compression.
+    return {{"claimable_buttons", claimable}, {"points", progress.points}};
+}
 QString countKey(DomainKind kind) {
     const QStringList keys{"Tacet Suppression Count", "Forgery Challenge Count",
                            "Simulation Challenge Count"};
@@ -99,7 +156,7 @@ DailyProgress dailyProgress(const QVector<TextLine> &objectives, const QVector<T
                 break;
             }
             case rust::WorkflowOp::DailyPointMatches: {
-                point = points.at(int(a[0])).text.trimmed();
+                point = dailyText(points.at(int(a[0])).text);
                 out[0] = QRegularExpression("^\\d{1,3}$").match(point).hasMatch();
                 break;
             }
@@ -125,7 +182,14 @@ DailyProgress observeDailyProgress(TaskContext &c, QJsonObject *observation) {
     QVector<TextLine> heading, objectives, strip, points, labels;
     QRect counter, labelArea;
     QJsonArray headingLines, objectiveLines, stripLines;
-    const QString dailyLabel = "^(?:活[跃躍]度|Daily\\s*Activity|Activity(?:\\s*Points?)?)$";
+    QJsonObject recovery;
+    const auto enlarged = [&](const QString &name, QRect area) {
+        auto lines = c.textScaled(area, .75, 2);
+        QJsonArray values;
+        for (const auto &line : lines) values.append(line.json());
+        recovery[name] = values;
+        return lines;
+    };
     DailyProgress result;
     rust::workflowRun(rust::WorkflowMethod::ObserveDailyProgress, {},
                       [&](rust::WorkflowOp op, const double *a, double *out) {
@@ -188,15 +252,36 @@ DailyProgress observeDailyProgress(TaskContext &c, QJsonObject *observation) {
                               break;
                           }
                           case rust::WorkflowOp::DailyHeadingMatches: {
-                              out[0] = bool(matchingText(heading, dailyLabel));
+                              bool matched = dailyActivityLabel(heading);
+                              if (!matched && c.streamedImage())
+                                  matched = dailyActivityLabel(enlarged("heading", gameBox(c.frame, .09, .08, .65, .18)));
+                              out[0] = matched;
                               break;
                           }
                           case rust::WorkflowOp::DailyCounterLabelMatches: {
-                              out[0] = bool(matchingText(labels, dailyLabel));
+                              bool matched = dailyActivityLabel(labels);
+                              if (!matched && c.streamedImage()) {
+                                  const auto anchors = dailyRewardAnchors(strip, c.frame);
+                                  recovery["reward_anchors"] = anchors;
+                                  matched = anchors >= 3;
+                                  if (!matched) matched = dailyActivityLabel(enlarged("label", labelArea));
+                              }
+                              out[0] = matched;
                               break;
                           }
                           case rust::WorkflowOp::ReadDailyProgress: {
                               result = dailyProgress(objectives, a[0] != 0 ? points : QVector<TextLine>{});
+                              if (result.points > 100) result.points = -1;
+                              if (a[0] != 0 && result.points < 0 && c.streamedImage()) {
+                                  auto local = enlarged("counter", counter);
+                                  // A crop can detect neighbouring text at its edge.
+                                  // Keep only the original counter's centre area.
+                                  local.erase(std::remove_if(local.begin(), local.end(), [&](const auto &line) {
+                                      return !counter.contains(line.center().toPoint());
+                                  }), local.end());
+                                  const auto recovered = dailyProgress({}, local).points;
+                                  if (recovered >= 0 && recovered <= 100) result.points = recovered;
+                              }
                               break;
                           }
                           case rust::WorkflowOp::HasDailyObservation: {
@@ -209,6 +294,7 @@ DailyProgress observeDailyProgress(TaskContext &c, QJsonObject *observation) {
                                               {"heading_lines", headingLines},
                                               {"objective_lines", objectiveLines},
                                               {"reward_strip_lines", stripLines}};
+                              if (!recovery.isEmpty()) (*observation)["recognition_recovery"] = recovery;
                               break;
                           }
                           default:
@@ -354,6 +440,8 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
     QJsonArray observations, pages, objectiveValues, box, selected;
     QJsonObject objective;
     QJsonValue previous, quota;
+    QJsonObject pendingClaim;
+    double pendingClaimAt = -1;
     QRect rect;
     TextLine target;
     DomainKind kind = DomainKind::Tacet;
@@ -452,8 +540,8 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
         }
         case rust::WorkflowOp::DailyObjectiveClaimText: {
             out[0] =
-                QRegularExpression("^(?:领取|領取|Claim|Collect)$", QRegularExpression::CaseInsensitiveOption)
-                    .match(objective["text"].toString().trimmed())
+                QRegularExpression("^(?:领取|領取|claim|collect)$")
+                    .match(dailyText(objective["text"].toString()))
                     .hasMatch();
             break;
         }
@@ -470,7 +558,9 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
             break;
         }
         case rust::WorkflowOp::StorePreviousDailyObjectives: {
-            previous = dailyObservation_.value("objective_lines");
+            previous = dailyClaimState(dailyObservation_, progress);
+            pendingClaim = {};
+            pendingClaimAt = -1;
             break;
         }
         case rust::WorkflowOp::ClickDailyObjective: {
@@ -478,7 +568,27 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
             break;
         }
         case rust::WorkflowOp::DailyObjectivesUnchanged: {
-            out[0] = previous == dailyObservation_["objective_lines"];
+            const auto before = previous.toObject();
+            const auto after = dailyClaimState(dailyObservation_, progress);
+            const int oldPoints = before["points"].toInt(-1);
+            const bool valid = oldPoints >= 0 && dailyObservation_["page_confirmed"].toBool() &&
+                               progress.points >= oldPoints && progress.points <= 100;
+            bool confirmed = valid && progress.points > oldPoints;
+            if (!confirmed && valid && after["claimable_buttons"].toInt() < before["claimable_buttons"].toInt()) {
+                // A single missing OCR button is not an acknowledgement. At the
+                // activity cap there may be no point increase: require the
+                // reduced button count to persist across another delayed read.
+                if (pendingClaim == after && pendingClaimAt >= 0)
+                    confirmed = c_.execution.now() - pendingClaimAt >= .2;
+                else {
+                    pendingClaim = after;
+                    pendingClaimAt = c_.execution.now();
+                }
+            } else {
+                pendingClaim = {};
+                pendingClaimAt = -1;
+            }
+            out[0] = !confirmed;
             break;
         }
         case rust::WorkflowOp::ScrollDailyPage: {
@@ -751,6 +861,11 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
             break;
         }
         case rust::WorkflowOp::DailyActionFailure: {
+            if (int(a[0]) == 2 || int(a[0]) == 3) {
+                dailyObservation_["claim_confirmation"] = QJsonObject{
+                    {"target", target.json()}, {"before", previous},
+                    {"after", dailyClaimState(dailyObservation_, progress)}};
+            }
             const QStringList errors{
                 "每日页面已打开，但活跃度连续识别失败，已保存页面与识别记录",
                 "未能进入每日页面，已保存当前画面与识别记录，请检查游戏是否允许打开索拉指南",

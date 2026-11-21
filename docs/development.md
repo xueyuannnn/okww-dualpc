@@ -87,6 +87,20 @@ CTest 覆盖设备协议、运行时、任务流程、通知、工坊和 Qt 界�
 
 已有完整运行目录时，可用 `tools_release/prepare_binary.py --runtime <完整包目录> --native-build build-native/Release --review release-review` 整理普通完整包。此工具复用已校验的可再分发运行库，采用重新编译的原生程序和当前公开源码，排除配置、队伍和构建残留；不会从系统下载或构建 Python 运行环境。首次制作完整运行目录时，需按第三方组件的许可部署动态库和 Python 依赖。
 
+后续默认采用固定环境与累计增量发布：
+
+```powershell
+.\.venv\Scripts\python.exe tools_release/prepare_environment.py --base-package <已校验普通包目录> --native-build build-native/Release --review <新的交付目录>
+```
+
+首次运行生成环境 ZIP、`ENVIRONMENT.json` 和累计增量 ZIP。后续加 `--environment <固定的ENVIRONMENT.json>` 复用相同环境，不重复发布大体积运行库。每个增量包含目标版本全部业务文件，省去环境中固定的运行库和模型；源码单独打包，不放进程序更新包。
+
+环境标识由依赖文件清单与 SHA-256 派生。依赖或模型发生变化时必须建立新环境；不得修改已发布环境的内容。README 下载区首位固定指向环境发布页，各版本发布对应增量、源码及校验文件。环境发布标签采用 `environment-<环境标识>`，软件版本检查跳过这类非版本标签。
+
+环境包单独建立 Release，只上传对应环境 ZIP、`ENVIRONMENT.json` 和 `SHA256SUMS.txt`。应用版本的 Release 首行链接其环境，Assets 为累计增量、源码 ZIP 和 `SHA256SUMS.txt`。发布前确认环境链接可用、目标环境标识一致、资产 SHA-256 与本地清单一致；个人包不上传。保留预览版标记，环境发布不设为软件的 Latest。
+
+验收覆盖旧版本直达新版本、脚本内容回退、旧文件清理、个人数据保留、环境损坏及安装回滚。`prepare_binary.py --update-from` 保留为旧版定向差分工具，不作为默认发布方式。
+
 工具只生成本地文件，不创建提交、标签、远程仓库或 GitHub Release。
 
 

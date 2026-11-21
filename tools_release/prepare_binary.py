@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -12,6 +13,7 @@ import zipfile
 from prepare_source import ROOT, SOURCE_NAME, SOURCE_ARCHIVE, digest
 
 PACKAGE_NAME = "OKWW-DualPC-full"
+PLATFORM = "win10-11-x64"
 RUNTIME_FOLDERS = {"generic", "imageformats", "networkinformation", "platforms", "styles", "tls", "licenses"}
 APPLICATIONS = {"OKWW-DualPC-Native-Dev.exe", "native_runtime_check.exe"}
 ENGINE_FOLDERS = ("src", "dualpc", "vendor", "assets", "icons", "i18n")
@@ -65,6 +67,8 @@ def verify_runtime(runtime: Path) -> dict:
     manifest = json.loads((runtime / "PACKAGE.json").read_text(encoding="utf-8-sig"))
     if manifest.get("variant") != "full" or manifest.get("runtime") not in {"C++ + Python workshop", "Rust + Qt + Python workshop"}:
         raise RuntimeError("Select a verified ordinary hybrid package, not a personal profile.")
+    if manifest.get("platform", PLATFORM) != PLATFORM:
+        raise RuntimeError("Use a runtime for the modern Windows x64 target.")
     for name in ("native-full-data", "native-teams", "native/personal", "dualpc.json", "native-device-settings.json"):
         if (runtime / name).exists():
             raise RuntimeError("The runtime contains a profile or imported teams.")
@@ -113,6 +117,7 @@ def write_manifest(stage: Path, source_exe_hash: str) -> list[Path]:
     manifest = {
         "version": "0.2.0", "channel": "preview", "variant": "full", "edition": "standard",
         "release_version": (ROOT / "native/RELEASE_VERSION").read_text(encoding="utf-8").strip(),
+        "platform": PLATFORM,
         # Keep the installer identifier accepted by existing versions.
         "runtime": "C++ + Python workshop", "core_language": "Rust", "frontend": "Qt6 Widgets",
         "status": "candidate-awaiting-hardware-acceptance",
@@ -124,6 +129,27 @@ def write_manifest(stage: Path, source_exe_hash: str) -> list[Path]:
     return files + [root / "PACKAGE.json"]
 
 
+def write_update_archive(stage: Path, base: dict, review: Path) -> Path:
+    root = windows_path(stage)
+    target = json.loads((root / "PACKAGE.json").read_text(encoding="utf-8"))
+    version = base["release_version"].removeprefix("v")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version):
+        raise RuntimeError("Invalid base version in update manifest.")
+    if version == target["release_version"].removeprefix("v"):
+        raise RuntimeError("Build the update from a different release.")
+    previous = {entry["path"].casefold(): entry["sha256"].lower() for entry in base["files"]}
+    archive = review / f"OK-WW-DualPC-update-{PLATFORM}-from-{version}.zip"
+    temporary = archive.with_suffix(".zip.tmp")
+    with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=5) as zipped:
+        zipped.write(root / "PACKAGE.json", f"{PACKAGE_NAME}/PACKAGE.json")
+        for entry in target["files"]:
+            relative = entry["path"]
+            if previous.get(relative.casefold()) != entry["sha256"]:
+                zipped.write(root / relative, f"{PACKAGE_NAME}/{relative}")
+    temporary.replace(archive)
+    return archive
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", type=Path, required=True)
@@ -132,6 +158,8 @@ def main() -> None:
     parser.add_argument("--review", type=Path, default=ROOT / "release-review")
     parser.add_argument("--link-runtime", action="store_true",
                         help="Hard-link immutable DLL/PYD dependencies in staging to reduce disk use")
+    parser.add_argument("--update-from", type=Path, action="append", default=[],
+                        help="Also build a delta for this verified, extracted standard release")
     args = parser.parse_args()
     runtime, review = args.runtime.resolve(), args.review.resolve()
     native_build = args.native_build.resolve()
@@ -139,7 +167,9 @@ def main() -> None:
         if not (native_build / name).is_file():
             raise RuntimeError("Rebuild the native application first: " + name)
     source = source_snapshot(review)
-    verify_runtime(runtime)
+    runtime_manifest = verify_runtime(runtime)
+    bases = [runtime_manifest if path.resolve() == runtime else verify_runtime(path.resolve())
+             for path in args.update_from]
     stage = review / PACKAGE_NAME
     if runtime == stage or stage in runtime.parents:
         raise RuntimeError("The source runtime must be separate from the output.")
@@ -188,7 +218,8 @@ def main() -> None:
         "- [源码构建](source/docs/development.md)\n\n"
         "此为普通包，不含个人配置。EXE 文件名为更新器的固定入口，个人包也沿用此名称。"
         "配置保存在 `native-full-data/`，首次运行自动生成。"
-        "“关于”页可检查 GitHub 新版本，确认后自动下载安装并保留配置。手动更新前建议备份此目录。\n\n"
+        "“关于”页可打开正在使用的配置目录，也可检查 GitHub 新版本。"
+        "有匹配的增量包时只下载变动文件，在原目录更新。切换到另一个目录前请先备份此目录。\n\n"
         "反馈邮箱：[lidada0202@gmail.com](mailto:lidada0202@gmail.com)。"
         "请附软件版本、设备型号、复现步骤和相关日志。\n", encoding="utf-8")
 
@@ -200,7 +231,8 @@ def main() -> None:
         for path in files:
             zipped.write(path, PACKAGE_NAME + "/" + path.relative_to(root).as_posix())
     temporary.replace(archive)
-    archives = [review / SOURCE_ARCHIVE, archive]
+    updates = [write_update_archive(stage, base, review) for base in bases]
+    archives = [review / SOURCE_ARCHIVE, archive, *dict.fromkeys(updates)]
     (review / "SHA256SUMS.txt").write_text(
         "".join(digest(path) + "  " + path.name + "\n" for path in archives), encoding="utf-8")
     report = {"files": len(files), "bytes": sum(p.stat().st_size for p in files),
