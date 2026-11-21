@@ -20,6 +20,58 @@ class TeamTests final : public QObject {
                   {{"id", m["id"]}, {"original_sources", m["original_sources"]}});
     }
   private slots:
+    void displayAliasesRemainUsableAfterReopeningTheCatalog() {
+        QTemporaryDir data;
+        TeamStore store(root, data.path());
+        const QVector<QPair<QString, QJsonArray>> cases{
+            {"Chisa, Suisui, Yangyang: Xuanling", {"Chisa", "Suisui", "YangYangSp"}},
+            {"Buling, Lynae, Luuk Herssen", {"Douling", "Linnai", "Luhesi"}},
+            {"Sigrika, Xiangli Yao, Shorekeeper", {"ShoreKeeper", "Xiangliyao", "Xigelika"}}};
+        for (const auto &[display, team] : cases) {
+            QStringList names;
+            for (auto member : team) names.append(member.toString());
+            names.sort();
+            const auto folder = data.path() + "/configs-dualpc/custom_teams/" + names.join("__");
+            writeJson(folder + "/team.json", {{"team", display}, {"code_mode", "builtin"}});
+        }
+        QCOMPARE(store.catalog().size(), cases.size());
+        QVERIFY(store.catalogWarnings().isEmpty());
+        for (const auto &[display, team] : cases) {
+            Q_UNUSED(display);
+            test::TeamReplay host({{"names", team}});
+            QVERIFY(store.selection(host).isEmpty());
+        }
+        store.validateEnabled();
+    }
+    void brokenSavedTeamsDoNotBlockUnrelatedTeamsOrModifyTheirFiles() {
+        QTemporaryDir data;
+        TeamStore store(root, data.path());
+        const auto directory = data.path() + "/configs-dualpc/custom_teams/";
+        store.createTeam({"Baizhi", "Mortefi", "Verina"});
+        const auto bad = directory + "Chisa__Suisui__YangYangSp/team.json";
+        writeJson(bad, {{"team", "Chisa, Suisui, Unknown"}, {"code_mode", "import"}});
+        QFile file(bad); QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto original = file.readAll(); file.close();
+        QVERIFY(QDir().mkpath(directory + "malformed"));
+        QFile malformed(directory + "malformed/team.json");
+        QVERIFY(malformed.open(QIODevice::WriteOnly)); malformed.write("{broken"); malformed.close();
+        for (const auto &name : {".pending-import", "old.backup"})
+            writeJson(directory + name + "/team.json", {{"team", "invalid"}});
+        QCOMPARE(store.catalog().size(), 1);
+        QCOMPARE(store.catalogWarnings().size(), 2);
+        store.validateEnabled();
+        test::TeamReplay valid({{"names", QJsonArray{"Baizhi", "Mortefi", "Verina"}}});
+        QVERIFY(store.selection(valid).isEmpty());
+        test::TeamReplay selected({{"names", QJsonArray{"Chisa", "Suisui", "YangYangSp"}}});
+        try {
+            store.selection(selected);
+            QFAIL("Invalid selected configuration silently fell back to builtin code");
+        } catch (const std::runtime_error &failure) {
+            const auto reason = errorText(failure);
+            QVERIFY(reason.contains("当前队伍配置无效")); QVERIFY(reason.contains(bad));
+        }
+        QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), original);
+    }
     void rejectsLegacyBinaryBeforeCallingItsEntryPoints() {
         QTemporaryDir temporaryRoot, data;
         QVERIFY(QDir().mkpath(temporaryRoot.path() + "/native-teams"));

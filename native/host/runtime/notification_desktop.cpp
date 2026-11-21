@@ -1,5 +1,6 @@
 #include "notification.hpp"
 #include "workflow_abi.hpp"
+#include "windows_compat.hpp"
 #include <future>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -967,7 +968,7 @@ class Messenger {
                 break;
             }
             case rust::WorkflowOp::NoticeDeliveryQueryDpi:
-                dpi_ = GetDpiForWindow(root_) / 96.;
+                dpi_ = wincompat::dpiForWindow(root_) / 96.;
                 break;
             case rust::WorkflowOp::NoticeDeliveryDpi:
                 out[0] = dpi_;

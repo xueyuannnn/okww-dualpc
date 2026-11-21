@@ -27,6 +27,8 @@ QPoint desktopAbsolute(QPoint point, QRect virtualDesktop);
 QRect virtualDesktopRect();
 INPUT hidInput(int usage, bool down);
 QJsonObject localInputEnvironment();
+// Diagnostic captions must never wait for another thread in this process.
+QString desktopWindowCaption(HWND window);
 inline constexpr ULONG_PTR localInputTag = 0x4F4B5757;
 // Installed on a dedicated message thread. Script-generated F is not physical F.
 class PhysicalKeys {

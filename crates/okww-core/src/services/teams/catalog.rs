@@ -15,9 +15,19 @@ impl Host {
                     if !self.flag(Op::TeamCatalogConfigExists, &[])? {
                         continue;
                     }
-                    self.action(Op::TeamCatalogReadConfig, &[])?;
-                    self.action(Op::TeamCatalogReadMembers, &[])?;
-                    self.action(Op::TeamCatalogComputeKey, &[])?;
+                    let identity = (|| {
+                        self.action(Op::TeamCatalogReadConfig, &[])?;
+                        self.action(Op::TeamCatalogReadMembers, &[])?;
+                        self.action(Op::TeamCatalogComputeKey, &[])
+                    })();
+                    if let Err(error) = identity {
+                        if self.scalar(Op::ExceptionKind, &[])? != 6. {
+                            return Err(error);
+                        }
+                        self.action(Op::ClearException, &[])?;
+                        self.action(Op::TeamCatalogRecordInvalid, &[])?;
+                        continue;
+                    }
                     self.action(Op::TeamCatalogClearLabels, &[])?;
                     let members = self.scalar(Op::TeamCatalogMemberCount, &[])? as usize;
                     for j in 0..members {

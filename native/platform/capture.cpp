@@ -1,6 +1,7 @@
 #include "capture.hpp"
 #include "capture_math_abi.hpp"
 #include "platform_workflow.hpp"
+#include "windows_compat.hpp"
 #include <optional>
 
 #include <deque>
@@ -1022,9 +1023,10 @@ struct CaptureFlowSdk {
         case rust::WorkflowOp::CaptureCheckCom:
             hr(com->result, "初始化采集 COM 失败");
             break;
-        case rust::WorkflowOp::CaptureDescribeThread:
-            SetThreadDescription(GetCurrentThread(), L"OKWW Capture");
+        case rust::WorkflowOp::CaptureDescribeThread: {
+            wincompat::describeCurrentThread(L"OKWW Capture");
             break;
+        }
         case rust::WorkflowOp::CaptureIsDshow:
             out[0] = c.config_.s("capture.backend") == "DSHOW";
             break;

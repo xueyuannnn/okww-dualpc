@@ -526,8 +526,25 @@ class TeamStoreContracts final : public QObject {
     }
     void catalogue() {
         QFETCH(int, scene);
-        QCOMPARE(catalogueReplay<TeamStore>(scene),
-                 catalogueReplay<team_store_reference::OriginalTeamStore>(scene));
+        const auto current = catalogueReplay<TeamStore>(scene);
+        if (scene % 31) {
+            QCOMPARE(current, currentErrorMessages(
+                catalogueReplay<team_store_reference::OriginalTeamStore>(scene)).toObject());
+            return;
+        }
+        // These fixtures contain an invalid saved team. It is now isolated;
+        // only an actual party using that configuration should fail selection.
+        QVERIFY(!current.contains("catalog_error"));
+        QCOMPARE(current["catalog"].toArray().size(), 1);
+        QCOMPARE(current["catalog"].toArray()[0].toObject()["team"].toArray(),
+                 (QJsonArray{"Cartethyia", "Ciaccona", "Rover"}));
+        const bool validParty = scene % 11 && scene % 13 && scene % 17;
+        if (validParty) {
+            QVERIFY(current["selection_error"].toString().startsWith("当前队伍配置无效："));
+        } else {
+            QVERIFY(!current.contains("selection_error"));
+            QCOMPARE(current["selection"].toString(), QString{});
+        }
     }
     void fingerprint_data() {
         QTest::addColumn<int>("scene");

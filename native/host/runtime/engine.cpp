@@ -274,9 +274,12 @@ QJsonObject Engine::catalog() const {
                             break;
                         case rust::EngineOp::CatalogSnapshotTeams:
                             result["teams"] = teamSwitchSnapshot_;
+                            if (!teamWarningsSnapshot_.isEmpty()) result["team_warnings"] = teamWarningsSnapshot_;
                             break;
                         case rust::EngineOp::CatalogLiveTeams:
                             result["teams"] = teams_->catalog();
+                            if (!teams_->catalogWarnings().isEmpty())
+                                result["team_warnings"] = teams_->catalogWarnings();
                             break;
                         default:
                             fail("Rust 任务目录宿主操作无效");
@@ -1989,6 +1992,8 @@ void Engine::scriptCommand(QJsonObject request) {
             connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, id] {
                 const auto response = watcher->result();
                 QJsonObject result, reply;
+                const bool initializing = loadingScripts_;
+                try {
                 rust::engineRun(
                     rust::EngineMethod::ScriptReply,
                     [&](rust::EngineOp action, const double *args, double *out, const std::exception_ptr &) {
@@ -2042,6 +2047,14 @@ void Engine::scriptCommand(QJsonObject request) {
                             fail("Rust 脚本完成宿主操作无效");
                         }
                     });
+                } catch (const std::exception &failure) {
+                    scriptsBusy_ = false;
+                    loadingScripts_ = false;
+                    if (initializing)
+                        emit message({{"event", "initialization_error"}, {"error", errorText(failure)}});
+                    else
+                        emit message({{"id", id}, {"ok", false}, {"error", errorText(failure)}});
+                }
             });
             watcher->setFuture(QtConcurrent::run([root = root_, data = data_, command] {
                 QJsonObject reply;
@@ -2142,6 +2155,7 @@ void Engine::switchTeamCode(QJsonObject request) {
         }
         case rust::EngineOp::SnapshotTeams: {
             teamSwitchSnapshot_ = teams_->catalog();
+            teamWarningsSnapshot_ = teams_->catalogWarnings();
             break;
         }
         case rust::EngineOp::SetTeamBusy: {

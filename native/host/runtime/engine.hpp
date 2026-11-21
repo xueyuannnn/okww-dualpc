@@ -39,7 +39,7 @@ class Engine final : public QObject {
     bool scriptsBusy_ = false;
     bool loadingScripts_ = false;
     bool teamSwitchBusy_ = false;
-    QJsonArray teamSwitchSnapshot_;
+    QJsonArray teamSwitchSnapshot_, teamWarningsSnapshot_;
     QMap<QString, std::shared_ptr<std::atomic<bool>>> scriptEnabled_;
     void scriptCommand(QJsonObject request);
     void switchTeamCode(QJsonObject request);

@@ -7,3 +7,17 @@
 - On POSIX shells, prefer `./.venv/bin/python` when present.
 - Fall back to `python` only when no local `.venv` interpreter exists.
 - Prefer invoking the interpreter directly, for example `.\.venv\Scripts\python.exe -m pytest`, instead of relying on shell activation.
+
+## Windows compatibility
+
+- Maintain Windows 7 SP1 x64 as a separate compatibility target alongside the Windows 10/11 build. Follow `docs/windows-compatibility.md` for the current status and acceptance requirements.
+- Keep the task, combat and device protocol behavior shared. Isolate platform and dependency differences instead of downgrading the modern runtime.
+- When changing Windows APIs, capture, inference, Python dependencies or packaging, check both targets. Run `tools_release/audit_win7.py --check-optional-apis` for source changes.
+- Do not claim Windows 7 support or publish a Windows 7 package until that complete package passes the Windows 7 acceptance checks. A successful modern build or static audit is insufficient.
+- While the first Win7 port is incomplete, modern releases may continue with their existing requirements. Record pending legacy work explicitly; do not label a modern package as Win7-compatible.
+
+## Build delivery and publication
+
+- Build and validate packages locally first. After every completed build, provide the version and clickable absolute paths to the standard package, personal package and installed executable when available.
+- Wait for an explicit publication command for that build before pushing to GitHub, creating or pushing tags, uploading release assets, or publishing a release. Approval for an earlier build does not authorize publication of a later build.
+- Keep existing published versions unchanged unless the user explicitly requests a change or removal.

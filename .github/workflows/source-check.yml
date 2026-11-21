@@ -31,6 +31,12 @@ jobs:
       - name: Check public source boundaries
         shell: pwsh
         run: python tools_release/prepare_source.py --check
+      - name: Audit optional Windows APIs
+        shell: pwsh
+        run: |
+          python -m unittest native.tests.test_win7_audit -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools_release/audit_win7.py --check-optional-apis
       - name: Check Python bridge syntax
         shell: pwsh
         run: python -m compileall -q workshop/bridge dualpc src

@@ -228,6 +228,13 @@ QWidget *Window::buildClassicCharacters() {
     importHint->setObjectName("caption");
     importHint->setWordWrap(true);
     teams->addWidget(importHint);
+    teamWarnings_ = new QLabel;
+    teamWarnings_->setObjectName("teamConfigWarnings");
+    teamWarnings_->setWordWrap(true);
+    teamWarnings_->setTextFormat(Qt::PlainText);
+    teamWarnings_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    teamWarnings_->hide();
+    teams->addWidget(teamWarnings_);
 #ifdef OKWW_NATIVE_ONLY
     auto syncHint = new QLabel("首次使用请打开工坊查看刷新状态，下载后可离线导入。");
     syncHint->setObjectName("workshopSyncSummary");

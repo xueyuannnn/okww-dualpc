@@ -17,6 +17,7 @@ class TeamStore {
     mutable std::recursive_mutex mutex_;
     QMap<QString, Module> modules_;
     mutable QByteArray validatedPythonSources_;
+    mutable QJsonArray catalogWarnings_;
     mutable std::shared_ptr<WorkshopFileSession> fileSession_;
     friend struct TeamStoreContractAccess;
     struct CatalogResult {
@@ -46,6 +47,7 @@ class TeamStore {
   public:
     TeamStore(QString root, QString data);
     QJsonArray catalog() const;
+    QJsonArray catalogWarnings() const;
     void validateEnabled() const;
     QString selection(CombatHost &host) const;
     std::unique_ptr<TeamMacro> create(const QString &selection, CombatHost &host) const;

@@ -9,6 +9,8 @@
 - OpenVINO Runtime 开发文件。现有完整包使用 2026.4.1。
 - Python 3.12，用于工坊引擎和 Python 测试。原生内置任务不依赖 Python 开发头文件。
 
+Win7 SP1 x64 为独立兼容目标，目前仍在移植准备阶段，不可使用当前 Qt 6 完整包。构建与发布要求见 [Windows 兼容维护](windows-compatibility.md)。
+
 仓库直接包含 `vendor/ok-script` 框架源码和识别资源，无需初始化子模块。构建产物、SDK、个人配置和导入队伍不在源码中。
 
 ## Python 工坊环境

@@ -4,7 +4,7 @@
 
 双机模式通过采集卡读取画面、KMBox Net 发送键鼠操作；也可使用本机 DXGI / Win32 截图和 SendInput 输入。业务内核使用 Rust，负责内置任务、角色连招、识别策略和设备控制；C++ 保留 Qt 界面及底层 SDK 适配，工坊、通用脚本和活动流程使用独立 Python 环境。
 
-基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.16**，支持 Windows 10／11 x64。
+基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.17**，支持 Windows 10／11 x64。
 
 [下载完整包](https://github.com/xueyuannnn/okww-dualpc/releases) · [使用说明](docs/usage.md) · [问题反馈](https://github.com/xueyuannnn/okww-dualpc/issues)
 
@@ -50,6 +50,8 @@ GitHub 提供的是普通包，不含个人配置。EXE 文件名是更新器沿
 | 键鼠输入 | KMBox Net、本机 SendInput |
 | 图像参数 | 按采集卡驱动枚举结果选择 |
 | 预览帧率 | 独立于采集帧率设置 |
+
+Win7 SP1 x64 兼容版正在准备，当前完整包仍不可用于 Win7；进度与功能范围见 [Windows 兼容维护](docs/windows-compatibility.md)。
 
 DXGI 和 Win32 默认采集主显示器，目标选择统一放在视频采集的高级设置中。采集帧率在外层选择或手动输入（1–1000），DXGI 也可跟随显示器刷新率。建议使用 16:9 游戏画面，有黑边时在高级设置中裁剪。
 

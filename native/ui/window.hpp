@@ -36,6 +36,7 @@ class NoWheel final : public QObject {
 };
 class Window final : public QMainWindow {
     Q_OBJECT
+    friend struct WindowStartupTestAccess;
     QString root_, data_, python_;
     Config config_, deviceDraftConfig_;
 #ifdef OKWW_NATIVE_ONLY
@@ -56,6 +57,7 @@ class Window final : public QMainWindow {
     bool teamOperation_ = false;
     bool devicesRunning_ = false, stopRequested_ = false, stoppingDevices_ = false, taskStopped_ = false;
     QString executionError_, retryTaskId_;
+    QString engineLoadError_, teamWarningSummary_;
     QPushButton *retryExecution_ = nullptr;
     QWidget *deviceSettings_ = nullptr;
     QLabel *deviceSaveStatus_ = nullptr;
@@ -71,6 +73,7 @@ class Window final : public QMainWindow {
         double limitSeconds;
         Config config;
         bool connected = false;
+        bool waitingForEngine = false;
     };
     std::optional<StartRequest> pendingStart_;
     QTimer startupTimer_, closeRetryTimer_;
@@ -107,7 +110,7 @@ class Window final : public QMainWindow {
     QListWidget *navigation_ = nullptr, *bottomNavigation_ = nullptr, *homeDevices_ = nullptr;
     QHash<QString, QLabel *> globalDescriptions_;
     QTableWidget *scheduleTable_ = nullptr;
-    QLabel *characterPortrait_ = nullptr, *teamCompatibility_ = nullptr;
+    QLabel *characterPortrait_ = nullptr, *teamCompatibility_ = nullptr, *teamWarnings_ = nullptr;
     QLabel *connectionTitle_ = nullptr, *captureConnection_ = nullptr, *boxConnection_ = nullptr,
            *frameParameters_ = nullptr, *frameAge_ = nullptr, *connectionTaskStatus_ = nullptr,
            *previewRate_ = nullptr;

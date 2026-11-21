@@ -110,6 +110,28 @@ class WorkshopTests final : public QObject {
             }
     }
   private slots:
+    void reportedWorkshopArchiveImportsValidatesAndSwitchesModes() {
+        const auto archive = qEnvironmentVariable("OKWW_WORKSHOP_REGRESSION_ZIP");
+        if (archive.isEmpty()) QSKIP("Set OKWW_WORKSHOP_REGRESSION_ZIP to replay a reported archive");
+        QVERIFY(QFile::exists(archive));
+        QTemporaryDir data;
+        TeamStore store(root, data.path());
+        store.importTeam(archive);
+        const auto catalog = store.catalog();
+        QCOMPARE(catalog.size(), 1);
+        const auto entry = catalog[0].toObject();
+        QCOMPARE(entry["team"].toArray(), (QJsonArray{"Chisa", "Suisui", "YangYangSp"}));
+        QVERIFY(entry["python"].toBool()); QVERIFY(entry["available"].toBool());
+        QVERIFY(store.catalogWarnings().isEmpty());
+        store.validateEnabled();
+        test::TeamReplay host({{"names", entry["team"]}});
+        QCOMPARE(store.selection(host), QString("python:Chisa__Suisui__YangYangSp"));
+        store.setMode(entry["team"].toArray(), "builtin");
+        QVERIFY(store.selection(host).isEmpty());
+        store.setMode(entry["team"].toArray(), "import");
+        store.validateEnabled();
+        QVERIFY(store.selection(host).startsWith("python:"));
+    }
     void builtinActivitiesShareNativeOcrAndCancelWithoutDeviceInput() {
         if(workshopPython(root).isEmpty()) QSKIP("Python compatibility runtime unavailable");
         for(const auto &id:QStringList{"GalGameTask","RahaiBlocksTask"}) {

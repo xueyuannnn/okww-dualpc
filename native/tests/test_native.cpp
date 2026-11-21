@@ -1,11 +1,53 @@
 #include "backend.hpp"
 #include "backend_capture_fixture.hpp"
+#include "windows_compat.hpp"
+#include "desktop.hpp"
+#include <future>
 #include <QTcpSocket>
 #include <QtTest>
 using namespace okww;
 class NativeTests : public QObject {
     Q_OBJECT
   private slots:
+    void inputDiagnosticsDoNotWaitForTheUiWindow() {
+        const auto window = CreateWindowExW(0, L"STATIC", L"diagnostic caption", 0,
+                                             0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+        QVERIFY(window);
+        QCOMPARE(desktopWindowCaption(window), QString("diagnostic caption"));
+        auto original = std::async(std::launch::async, [window] {
+            wchar_t text[128]{};
+            GetWindowTextW(window, text, 128);
+            return QString::fromWCharArray(text);
+        });
+        const bool originalBlocked = original.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+        while (original.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+            MSG message;
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
+        }
+        const auto originalTitle = original.get();
+        auto caption = std::async(std::launch::async, [window] { return desktopWindowCaption(window); });
+        // Deliberately do not dispatch UI messages while the input thread reads
+        // the caption. The old call blocks on WM_GETTEXT until we pump below.
+        const bool independent = caption.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+        if (!independent) {
+            MSG message;
+            while (caption.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready)
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
+        }
+        const auto result = caption.get();
+        DestroyWindow(window);
+        QVERIFY(originalBlocked);
+        QCOMPARE(originalTitle, QString("diagnostic caption"));
+        QVERIFY2(independent, "Input diagnostics waited for the UI while it may be waiting for the backend lock");
+        QVERIFY(result.isEmpty());
+    }
+    void legacyDpiFallbackProvidesCoordinatesWithoutTheNewApi() {
+        const auto dc=GetDC(nullptr);QVERIFY(dc);
+        const auto expected=UINT(GetDeviceCaps(dc,LOGPIXELSX));ReleaseDC(nullptr,dc);
+        QCOMPARE(wincompat::detail::windowDpi(nullptr,nullptr),expected);
+        const auto modern=[](HWND)->UINT{return 144;};
+        QCOMPARE(wincompat::detail::windowDpi(nullptr,modern),UINT(144));
+    }
     void captureJitterWaitsWithoutDisarming_data() {
         QTest::addColumn<QString>("source");
         QTest::addColumn<QString>("backendName");

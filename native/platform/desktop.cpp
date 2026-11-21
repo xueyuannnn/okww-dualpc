@@ -1,22 +1,32 @@
 #include "desktop.hpp"
 #include "desktop_input_abi.hpp"
 #include "platform_workflow.hpp"
+#include "windows_compat.hpp"
 #include <array>
 #include <map>
 
 namespace okww {
-namespace {
-struct DpiScope {
-    DPI_AWARENESS_CONTEXT previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    ~DpiScope() {
-        if (previous)
-            SetThreadDpiAwarenessContext(previous);
-    }
-};
-QString windowTitle(HWND window) {
+QString desktopWindowCaption(HWND window) {
+    DWORD process = 0;
+    const auto thread = GetWindowThreadProcessId(window, &process);
+    // GetWindowText sends WM_GETTEXT for our own windows. Input runs with the
+    // backend lock held; waiting for the UI here would deadlock its status poll.
+    if (!thread || (process == GetCurrentProcessId() && thread != GetCurrentThreadId()))
+        return {};
     wchar_t text[1024]{};
     GetWindowTextW(window, text, 1024);
     return QString::fromWCharArray(text);
+}
+namespace {
+struct DpiScope {
+    DPI_AWARENESS_CONTEXT previous = wincompat::setThreadDpiContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    ~DpiScope() {
+        if (previous)
+            wincompat::setThreadDpiContext(previous);
+    }
+};
+QString windowTitle(HWND window) {
+    return desktopWindowCaption(window);
 }
 QString windowClass(HWND window) {
     wchar_t text[256]{};

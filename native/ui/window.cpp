@@ -1,4 +1,5 @@
 #include "window.hpp"
+#include "windows_compat.hpp"
 #include <QDesktopServices>
 #ifdef OKWW_NATIVE_ONLY
 #include "runtime/diagnostics.hpp"
@@ -113,7 +114,14 @@ Window::Window(QString root, QString data, QString python,
     startupTimer_.setSingleShot(true);
     startupTimer_.setInterval(30000);
     connect(&startupTimer_, &QTimer::timeout, this, [this] {
-        failStartup("设备准备超时，请检查采集卡和盒子连接后重试。");
+        if (!pendingStart_) return;
+        const auto state = backend_.snapshot();
+        const bool connected = state["capture_connected"].toBool() && state["box"].toObject()["connected"].toBool();
+        failStartup(connected && !engineReady_
+            ? engineLoadError_.isEmpty()
+                ? "任务引擎或脚本目录初始化超时；视频与键鼠已连接，请查看运行日志中的载入错误。"
+                : "任务引擎载入失败：" + engineLoadError_
+            : "设备连接准备超时，请检查采集来源和键鼠输入。" );
     });
     closeRetryTimer_.setInterval(100);
     connect(&closeRetryTimer_, &QTimer::timeout, this, [this] {
@@ -258,7 +266,7 @@ bool Window::nativeEvent(const QByteArray &, void *message, qintptr *result) {
         POINT point{};
         GetWindowRect(reinterpret_cast<HWND>(winId()), &r);
         GetCursorPos(&point);
-        const int edge = std::max(5, int(GetDpiForWindow(reinterpret_cast<HWND>(winId())) * 6 / 96));
+        const int edge = std::max(5, int(wincompat::dpiForWindow(reinterpret_cast<HWND>(winId())) * 6 / 96));
         const bool left = point.x < r.left + edge, right = point.x >= r.right - edge,
                    top = point.y < r.top + edge, bottom = point.y >= r.bottom - edge;
         if (top || bottom || left || right) {
@@ -1413,6 +1421,7 @@ void Window::updateStartControl() {
     if (!start_)
         return;
     start_->setProperty("startupPending", bool(pendingStart_));
+    start_->setProperty("startupStage", pendingStart_ && pendingStart_->waitingForEngine ? "engine" : "devices");
     start_->setProperty("deviceBusy", busy_);
     start_->setProperty("devicesRunning", devicesRunning_);
     const bool stopping = stopRequested_ || stoppingDevices_;
@@ -1435,18 +1444,23 @@ void Window::updateStartControl() {
     start_->setToolTip(pendingStart_ ? "正在准备设备；再次点击或按快捷键取消，不会在取消后启动任务。"
                          : devicesRunning_ ? "停止自动任务并断开采集卡和盒子；F9 仅暂停或继续自动任务。"
                                            : "自动连接采集卡和盒子，再启动已启用的实时任务。");
-    if (pendingStart_)
-        connectionTaskStatus_->setText("正在准备设备与任务… 可点击“取消启动”。");
-    if (pendingStart_ && taskStatus_)
-        taskStatus_->setText("正在准备设备与任务… 可取消");
+    if (pendingStart_) {
+        const auto text = pendingStart_->waitingForEngine
+            ? "设备已连接，正在载入任务引擎与脚本… 可取消"
+            : "正在连接视频与键鼠… 可取消";
+        connectionTaskStatus_->setText(text);
+        if (taskStatus_) taskStatus_->setText(text);
+    }
     if (startConnection_)
         startConnection_->setEnabled(!busy_ && !pendingStart_ && !stopping);
     refreshTaskActions();
 }
 void Window::failStartup(const QString &error) {
+    const auto stage = pendingStart_ && pendingStart_->waitingForEngine ? "engine" : "devices";
     pendingStart_.reset();
     startupTimer_.stop();
-    showExecutionError(error, {{"phase", "startup"}});
+    showExecutionError(error, {{"phase", "startup"}, {"startup_stage", stage}, {"device_operation_busy", busy_},
+                              {"engine_ready", engineReady_}, {"engine_error", engineLoadError_}});
     updateStartControl();
     emit startupFailed(error);
 }
@@ -1567,13 +1581,21 @@ void Window::startTask(QString id, bool exitAfter, double limitSeconds) {
         return;
     }
     pendingStart_ = StartRequest{id, exitAfter, limitSeconds, config_};
-    startupTimer_.start();
+#ifdef OKWW_NATIVE_ONLY
+    if (!engineReady_ && !engineLoadError_.isEmpty()) startEngine();
+#endif
+    startupTimer_.start(30000);
     updateStartControl();
     continueStart();
 }
 void Window::continueStart() {
     if (!pendingStart_ || busy_ || closing_)
         return;
+    if (!engineReady_ && !engineLoadError_.isEmpty()) {
+        pendingStart_->waitingForEngine = true;
+        failStartup("任务引擎载入失败：" + engineLoadError_);
+        return;
+    }
     const auto state = backend_.snapshot();
     const auto box = state["box"].toObject();
     if (!backend_.configurationMatches(pendingStart_->config) ||
@@ -1593,6 +1615,11 @@ void Window::continueStart() {
         return;
     }
     if (!engineReady_) {
+        if (!pendingStart_->waitingForEngine) {
+            pendingStart_->waitingForEngine = true;
+            startupTimer_.start(120000);
+            log("视频与键鼠已连接，正在等待任务引擎和脚本目录载入…");
+        }
 #ifdef OKWW_NATIVE_ONLY
         if (!nativeEngine_ && !nativeRestartPending_)
             startEngine();
@@ -1651,7 +1678,9 @@ void Window::startEngine() {
         return;
     }
     try {
+        engineReady_ = false;
         nativeEngine_.reset();
+        engineLoadError_.clear();
         callbacks_.clear();
         errorCallbacks_.clear();
         const int generation = ++nativeGeneration_;
@@ -1664,7 +1693,9 @@ void Window::startEngine() {
         nativeEngine_->load();
     } catch (const std::exception &error) {
         engineReady_ = false;
-        log(errorText(error));
+        engineLoadError_ = errorText(error);
+        engineStatus_->setText("任务引擎载入失败：" + engineLoadError_);
+        log(engineStatus_->text());
     }
 #else
     if (engine_.state() != QProcess::NotRunning)
@@ -1726,6 +1757,7 @@ void Window::readEngine() {
 void Window::handleEngineMessage(const QJsonObject &o) {
     auto event = o["event"].toString();
     if (event == "ready") {
+        engineLoadError_.clear();
         engineReady_ = true;
         setCatalog(o["data"].toObject());
 #ifdef OKWW_NATIVE_ONLY
@@ -1738,6 +1770,14 @@ void Window::handleEngineMessage(const QJsonObject &o) {
 #endif
         updateStartControl();
         QTimer::singleShot(0, this, &Window::continueStart);
+    } else if (event == "initialization_error") {
+        engineReady_ = false;
+        engineLoadError_ = o["error"].toString("未知的执行器载入错误");
+        log("任务引擎载入失败：" + engineLoadError_);
+        if (pendingStart_) {
+            pendingStart_->waitingForEngine = true;
+            failStartup("任务引擎载入失败：" + engineLoadError_);
+        }
     } else if (event == "catalog_changed") {
         setCatalog(o["data"].toObject());
     } else if (event == "log") {
@@ -1790,7 +1830,8 @@ void Window::handleEngineMessage(const QJsonObject &o) {
         updateStartControl();
         taskStatus_->setText(
             stopRequested_ || stoppingDevices_ ? "正在停止并断开设备…"
-            : pendingStart_ ? "正在准备设备与任务… 可取消"
+            : pendingStart_ ? pendingStart_->waitingForEngine ? "设备已连接，正在载入任务引擎与脚本… 可取消"
+                                                                  : "正在连接视频与键鼠… 可取消"
             : !executionError_.isEmpty() ? "异常已暂停 · 修正问题后可直接重试任务"
             : automation_
                 ? "正在运行：" + (s["current"].toString().isEmpty() ? "实时触发" : s["current"].toString())
@@ -1854,7 +1895,8 @@ void Window::updateStatus() {
                            : running                        ? "当前配置已应用。"
                                                             : "点击右上角“开始”一键连接并运行，无需单独启动线程。");
     connectionTaskStatus_->setText(
-        pendingStart_ ? "正在准备设备与任务… 可点击“取消启动”。"
+        pendingStart_ ? pendingStart_->waitingForEngine ? "设备已连接，正在载入任务引擎与脚本… 可取消"
+                                                        : "正在连接视频与键鼠… 可取消"
         : !executionError_.isEmpty() ? "异常已暂停 · 设备保持连接。修正问题后点击“重试任务”，无需终止线程。"
         : automation_ ? "自动任务正在运行。"
         : running && taskStopped_ ? "当前任务已停止，设备保持连接。可开始新任务，或点击右上角“停止”释放设备。"
@@ -1899,6 +1941,22 @@ QJsonObject Window::selectedTeam() const {
 }
 void Window::setCatalog(const QJsonObject &c) {
     catalog_ = c;
+    QStringList warnings;
+    for (const auto &entry : c.value("team_warnings").toArray()) {
+        const auto warning = entry.toObject();
+        warnings.append(warning["path"].toString() + "：" + warning["error"].toString());
+    }
+    const auto summary = warnings.join('\n');
+    if (teamWarnings_) {
+        teamWarnings_->setVisible(!warnings.isEmpty());
+        teamWarnings_->setText(QString("%1 份队伍配置待修复，其他队伍可继续使用。\n详细文件与原因见提示和运行日志。")
+                                  .arg(warnings.size()));
+        teamWarnings_->setToolTip(summary);
+    }
+    if (summary != teamWarningSummary_) {
+        teamWarningSummary_ = summary;
+        if (!summary.isEmpty()) log("无效队伍配置已单独保留，未删除原文件：\n" + summary);
+    }
 #ifdef OKWW_NATIVE_ONLY
     refreshScripts();
 #endif

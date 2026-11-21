@@ -6,6 +6,21 @@
 #include <QDesktopServices>
 #include <QUrlQuery>
 using namespace okww;
+namespace okww {
+struct WindowStartupTestAccess {
+    static bool ready(const Window &window) { return window.engineReady_; }
+    static void holdEngine(Window &window) { window.engineReady_ = false; window.engineLoadError_.clear(); }
+    static bool waitingForEngine(const Window &window) {
+        return window.pendingStart_ && window.pendingStart_->waitingForEngine;
+    }
+    static void timeout(Window &window) {
+        QMetaObject::invokeMethod(&window.startupTimer_, "timeout", Qt::DirectConnection);
+    }
+    static void restore(Window &window) {
+        window.handleEngineMessage({{"event", "ready"}, {"data", window.catalog_}});
+    }
+};
+}
 class MailRecorder final : public QObject {
     Q_OBJECT
   public:
@@ -45,6 +60,41 @@ class ClassicUiTests final : public QObject {
         return runtime::Profile(data.path() + "/configs-dualpc", root + "/native/resources/catalog.json");
     }
   private slots:
+    void badTeamIsReportedWithoutBlockingStartupAndEngineWaitCanBeRetried() {
+        QTemporaryDir data;
+        const auto bad = data.path() + "/configs-dualpc/custom_teams/broken/team.json";
+        writeJson(bad, {{"team", "Chisa, Suisui, Unknown"}});
+        int connections = 0;
+        Backend *backend = nullptr;
+        auto window = create(data, [&](Backend &value, const Config &config) {
+            ++connections; backend = &value; value.start(config, true);
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(WindowStartupTestAccess::ready(*window), 15000);
+        auto warning = window->findChild<QLabel *>("teamConfigWarnings");
+        QVERIFY(warning); QVERIFY(!warning->isHidden()); QVERIFY(warning->toolTip().contains(bad));
+        WindowStartupTestAccess::holdEngine(*window);
+        QSignalSpy failed(window.get(), &Window::startupFailed);
+        QSignalSpy accepted(window.get(), &Window::taskStartAccepted);
+        QPushButton *start = nullptr;
+        for (auto button : window->findChildren<QPushButton *>())
+            if (button->property("automationControl").toBool()) start = button;
+        QVERIFY(start); start->click();
+        QTRY_VERIFY(WindowStartupTestAccess::waitingForEngine(*window));
+        WindowStartupTestAccess::timeout(*window);
+        QCOMPARE(failed.count(), 1);
+        QVERIFY(failed[0][0].toString().contains("任务引擎"));
+        QVERIFY(!failed[0][0].toString().contains("设备连接准备超时"));
+        QVERIFY(backend && backend->snapshot()["capture_connected"].toBool());
+        QVERIFY(backend->snapshot()["box"].toObject()["connected"].toBool());
+        QCOMPARE(accepted.count(), 0);
+        WindowStartupTestAccess::restore(*window);
+        auto retry = window->findChild<QPushButton *>("retryFailedTask");
+        QVERIFY(retry); retry->click();
+        QTRY_COMPARE_WITH_TIMEOUT(accepted.count(), 1, 15000);
+        QCOMPARE(connections, 1);
+        start->click();
+        QTRY_VERIFY(!start->property("deviceBusy").toBool());
+    }
     void accountProfilesUseGraphicalDailyFieldsWithoutChangingGlobalValues() {
         QTemporaryDir data;
         auto settings=profile(data);

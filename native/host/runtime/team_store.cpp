@@ -87,6 +87,14 @@ QString canonical(QString name) {
                               fail("Rust 队伍角色名宿主无效");
                           }
                       });
+    static const QHash<QString, QString> aliases{
+        {"buling", "Douling"}, {"sigrika", "Xigelika"}, {"luuk herssen", "Luhesi"},
+        {"xiangli yao", "Xiangliyao"}, {"yangyang: xuanling", "YangYangSp"},
+        {"lynae", "Linnai"}};
+    if (const auto found = aliases.constFind(name.toCaseFolded()); found != aliases.cend())
+        return found.value();
+    for (const auto &candidate : nativeCharacterClasses())
+        if (candidate.compare(name, Qt::CaseInsensitive) == 0) return candidate;
     return name;
 }
 bool safeSource(const QString &name) {
@@ -568,11 +576,21 @@ TeamStore::CatalogResult TeamStore::runCatalog(int method, QString id, CombatHos
                 path = entries.at(int(a[0])).absoluteFilePath() + "/team.json";
                 break;
             case rust::WorkflowOp::TeamCatalogConfigExists:
-                out[0] = QFile::exists(path);
+                out[0] = !QFileInfo(path).dir().dirName().startsWith('.') &&
+                         !QFileInfo(path).dir().dirName().endsWith(".backup") && QFile::exists(path);
                 break;
             case rust::WorkflowOp::TeamCatalogReadConfig:
+                config = {};
                 config = readJson(path);
                 break;
+            case rust::WorkflowOp::TeamCatalogRecordInvalid: {
+                QString reason;
+                try { std::rethrow_exception(error); }
+                catch (const std::exception &failure) { reason = errorText(failure); }
+                catalogWarnings_.append(QJsonObject{{"path", path}, {"error", reason},
+                                                    {"team", config.value("team")}});
+                break;
+            }
             case rust::WorkflowOp::TeamCatalogReadMembers:
                 team = members(config["team"]);
                 break;
@@ -744,6 +762,15 @@ TeamStore::CatalogResult TeamStore::runCatalog(int method, QString id, CombatHos
                 break;
             case rust::WorkflowOp::TeamCatalogLoadSelectedConfig:
                 config = teamConfig(team);
+                if (!config.isEmpty()) {
+                    try {
+                        auto expected = team; expected.sort();
+                        if (members(config.value("team")) != expected)
+                            fail("配置中的队伍成员与当前队伍不一致");
+                    } catch (const std::exception &failure) {
+                        fail("当前队伍配置无效：" + folder(team) + "/team.json\n" + errorText(failure));
+                    }
+                }
                 break;
             case rust::WorkflowOp::TeamCatalogConfigImportMode:
                 out[0] = std::as_const(config)["code_mode"] == "import";
@@ -796,7 +823,12 @@ TeamStore::CatalogResult TeamStore::runCatalog(int method, QString id, CombatHos
 }
 QJsonArray TeamStore::catalog() const {
     std::lock_guard lock(mutex_);
+    catalogWarnings_ = {};
     return runCatalog(int(rust::WorkflowMethod::TeamStoreCatalog)).array;
+}
+QJsonArray TeamStore::catalogWarnings() const {
+    std::lock_guard lock(mutex_);
+    return catalogWarnings_;
 }
 void TeamStore::validateEnabled() const { runCatalog(int(rust::WorkflowMethod::TeamStoreValidateEnabled)); }
 QString TeamStore::selection(CombatHost &host) const {

@@ -2,6 +2,7 @@
 #include "capture_math_abi.hpp"
 #include "desktop.hpp"
 #include "platform_workflow.hpp"
+#include "windows_compat.hpp"
 #include <QTransform>
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -406,7 +407,7 @@ struct CaptureDesktopRunSdk {
         DPI_AWARENESS_CONTEXT context;
         ~RestoreDpi() {
             if (context)
-                SetThreadDpiAwarenessContext(context);
+                wincompat::setThreadDpiContext(context);
         }
     };
     std::optional<RestoreDpi> restore;
@@ -425,7 +426,7 @@ struct CaptureDesktopRunSdk {
     void operator()(rust::WorkflowOp op, const double *a, double *out, const std::exception_ptr &error) {
         switch (op) {
         case rust::WorkflowOp::DesktopRunSetDpi:
-            previousDpi = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            previousDpi = wincompat::setThreadDpiContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             break;
         case rust::WorkflowOp::DesktopRunDpiGuard:
             restore.emplace(previousDpi);
