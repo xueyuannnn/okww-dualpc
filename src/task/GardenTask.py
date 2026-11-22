@@ -39,7 +39,7 @@ class GardenTask(WWOneTimeTask, BaseWWTask):
 
     def run(self):
         WWOneTimeTask.run(self)
-        self.ensure_main()
+        self.ensure_main(allow_book=True)
         while True:
             self.open_garden_weekly_page()
             observed = [None]

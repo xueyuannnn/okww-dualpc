@@ -93,6 +93,10 @@ FarmResult DomainFarm::rustRun(int method, std::initializer_list<double> args, Q
                 break;
             }
             case rust::WorkflowOp::NavFarmEntry: {
+                if(int(a[0])==2) {
+                    navigation_.selectBookEntry(int(a[1]),3,{},true);
+                    break;
+                }
                 const QVector<QVector<int>> structures{{4, 5, 5, 7}, {5, 5, 5, 5}};
                 const int totals[]{21, 20};
                 navigation_.selectBookEntry(int(a[1]), totals[int(a[0])], structures.at(int(a[0])));
@@ -110,6 +114,10 @@ FarmResult DomainFarm::rustRun(int method, std::initializer_list<double> args, Q
             }
             case rust::WorkflowOp::NavWaitTeam: {
                 navigation_.waitTeam(a[0]);
+                break;
+            }
+            case rust::WorkflowOp::NavPrepareBook: {
+                navigation_.ensureMain(a[0],true,true);
                 break;
             }
             case rust::WorkflowOp::NavEnsureMain: {

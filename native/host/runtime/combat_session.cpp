@@ -225,7 +225,12 @@ void CombatSession::publishParty(const QString &codeState) {
                 }
                 case rust::SessionOp::InitializePartyReport: {
                     report = identity;
-                    if (context_.streamedImage()) report["hud"] = context_.partyObservation;
+                    if (context_.streamedCapture || context_.streamedImage()) report["hud"] = context_.partyObservation;
+                    if (context_.streamedCapture) report["recognition"] = QJsonObject{
+                        {"mode",context_.localDesktopGame ? "local" : "remote"},
+                        {"configured",context_.desktopRecognitionMode},
+                        {"compressed_tolerance",context_.streamedImage()},
+                        {"environment",context_.recognitionEnvironment}};
                     if (context_.streamedCapture) report["target_observation"] = vision_.targetEvidence();
                     break;
                 }

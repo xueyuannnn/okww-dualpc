@@ -408,7 +408,11 @@ bool Daily::stage(const QString &name, const std::function<void()> &operation, b
                        c_.notify("每日任务步骤未完成", name + "：" + error, true);
                        break;
                    }
-                   case rust::WorkflowOp::NavEnsureMain: {
+                   case rust::WorkflowOp::NavPrepareBook: {
+                navigation_.ensureMain(a[0],true,true);
+                break;
+            }
+            case rust::WorkflowOp::NavEnsureMain: {
                        navigation_.ensureMain(a[0]);
                        break;
                    }
@@ -666,7 +670,11 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
             navigation_.ensureMain();
             break;
         }
-        case rust::WorkflowOp::NavEnsureMain: {
+        case rust::WorkflowOp::NavPrepareBook: {
+                navigation_.ensureMain(a[0],true,true);
+                break;
+            }
+            case rust::WorkflowOp::NavEnsureMain: {
             navigation_.ensureMain(a[0]);
             break;
         }
@@ -1058,6 +1066,10 @@ void Daily::run(bool enhanced, const QJsonObject &overrides, const QString &acco
             }
             case rust::WorkflowOp::ResetDailyLoggedIn: {
                 c_.state->loggedIn = false;
+                break;
+            }
+            case rust::WorkflowOp::NavPrepareBook: {
+                navigation_.ensureMain(a[0],true,true);
                 break;
             }
             case rust::WorkflowOp::NavEnsureMain: {

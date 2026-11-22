@@ -261,6 +261,9 @@ struct Probe {
                 case O::NestFindEcho:
                     out[0] = interaction.findEcho(false, true, a[0]).first;
                     break;
+                // This corpus models a world page. Reusing a guide page is
+                // exercised with real images in BookNavigationTests.
+                case O::NavPrepareBook:
                 case O::NavEnsureMain:
                     nav.ensureMain();
                     break;

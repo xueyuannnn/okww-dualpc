@@ -2783,7 +2783,7 @@
             "trigger": false
         },
         {
-            "description": "在进入BOSS战斗后点击开始",
+            "description": "选择传送分类和目标 Boss 序号后开始；不传送时，请先进入对应战斗。",
             "enabled": false,
             "fields": [
                 {
@@ -2808,6 +2808,87 @@
                 },
                 {
                     "allow_duplication": false,
+                    "default": "All Challenges",
+                    "description": "按索拉指南列表顺序轮刷所选分类。",
+                    "key": "Cycle Scope",
+                    "kind": "select",
+                    "label": "循环刷取范围",
+                    "maximum": null,
+                    "minimum": null,
+                    "options": [
+                        "All Challenges",
+                        "Boss Challenge",
+                        "Weekly Challenge"
+                    ],
+                    "sub_config": false,
+                    "value": "All Challenges",
+                    "option_labels": [
+                        "全部分类",
+                        "讨伐强敌",
+                        "战歌重奏"
+                    ],
+                    "visible_when": {
+                        "Farm Mode": "Cycle All Dungeons"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": "Boss Challenge",
+                    "description": "选择全部分类时，从此分类开始，之后继续另一分类。",
+                    "key": "Cycle Start Category",
+                    "kind": "select",
+                    "label": "起刷分类",
+                    "maximum": null,
+                    "minimum": null,
+                    "options": [
+                        "Boss Challenge",
+                        "Weekly Challenge"
+                    ],
+                    "sub_config": false,
+                    "value": "Boss Challenge",
+                    "option_labels": [
+                        "讨伐强敌",
+                        "战歌重奏"
+                    ],
+                    "visible_when": {
+                        "Farm Mode": "Cycle All Dungeons",
+                        "Cycle Scope": "All Challenges"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "按起刷分类从上到下计数：讨伐强敌 1～20，战歌重奏 1～9。轮到末尾后从头继续。",
+                    "key": "Cycle Start Index",
+                    "kind": "integer",
+                    "label": "起刷 Boss 序号",
+                    "maximum": 20,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Cycle All Dungeons"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "完成这些战斗轮数后切换到下一个 Boss；未掉落声骸也计一轮。",
+                    "key": "Rounds per Dungeon",
+                    "kind": "integer",
+                    "label": "每个副本刷取轮数",
+                    "maximum": 100000,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Cycle All Dungeons"
+                    }
+                },
+                {
+                    "allow_duplication": false,
                     "default": false,
                     "description": "如果启用，只会在下列三个条件均满足时执行：(1) 选项 \"传送至Boss\" 为 \"战歌重奏\" (2) 高级技能材料 获取次数 未达每周上限 (3) 体力至少够刷1次。此时，选项 \"刷多少次\" 将会被无视，实际刷取次数取决于 每周上限 和 剩余体力。",
                     "key": "Advanced Skill Material Mode",
@@ -2817,15 +2898,18 @@
                     "minimum": null,
                     "options": null,
                     "sub_config": false,
-                    "value": false
+                    "value": false,
+                    "visible_when": {
+                        "Farm Mode": "Single Boss"
+                    }
                 },
                 {
                     "allow_duplication": false,
                     "default": "No",
-                    "description": "在F2菜单中传送至Boss",
+                    "description": "选择分类后，在下方设置目标 Boss 的索拉指南序号；选“否”则在当前位置刷取。",
                     "key": "Teleport to Boss",
                     "kind": "select",
-                    "label": "传送至Boss",
+                    "label": "传送目标分类",
                     "maximum": null,
                     "minimum": null,
                     "option_labels": [
@@ -2839,7 +2923,44 @@
                         "Boss Challenge"
                     ],
                     "sub_config": true,
-                    "value": "No"
+                    "value": "No",
+                    "visible_when": {
+                        "Farm Mode": "Single Boss"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "F2 → 战歌重奏，按列表从上到下计数，第一项为 1。修改后自动保存，下次开始任务时生效。",
+                    "key": "Which Weekly Boss to Teleport",
+                    "kind": "integer",
+                    "label": "目标 Boss（战歌重奏序号）",
+                    "maximum": 9,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Single Boss",
+                        "Teleport to Boss": "Weekly Challenge"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "F2 → 讨伐强敌，按列表从上到下计数，第一项为 1。修改后自动保存，下次开始任务时生效。",
+                    "key": "Which Boss Challenge to Teleport",
+                    "kind": "integer",
+                    "label": "目标 Boss（讨伐强敌序号）",
+                    "maximum": 20,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Single Boss",
+                        "Teleport to Boss": "Boss Challenge"
+                    }
                 },
                 {
                     "allow_duplication": false,
@@ -2870,10 +2991,10 @@
                 {
                     "allow_duplication": false,
                     "default": "Other",
-                    "description": "选择Boss配置 (已包含战斗开始前等待时间)",
+                    "description": "设置特殊机制与开场等待，不决定传送目标。不在列表中的 Boss 选“其它”。",
                     "key": "Boss",
                     "kind": "select",
-                    "label": "首领选择",
+                    "label": "首领行为配置",
                     "maximum": null,
                     "minimum": null,
                     "option_labels": [
@@ -2899,7 +3020,10 @@
                         "Nameless Explorer"
                     ],
                     "sub_config": true,
-                    "value": "Other"
+                    "value": "Other",
+                    "visible_when": {
+                        "Farm Mode": "Single Boss"
+                    }
                 },
                 {
                     "allow_duplication": false,
@@ -3317,7 +3441,7 @@
             "trigger": false
         },
         {
-            "description": "在进入BOSS战斗后点击开始",
+            "description": "选择传送分类和目标 Boss 序号后开始；不传送时，请先进入对应战斗。",
             "enabled": false,
             "fields": [
                 {
@@ -3342,11 +3466,92 @@
                 },
                 {
                     "allow_duplication": false,
+                    "default": "All Challenges",
+                    "description": "按索拉指南列表顺序轮刷所选分类。",
+                    "key": "Cycle Scope",
+                    "kind": "select",
+                    "label": "循环刷取范围",
+                    "maximum": null,
+                    "minimum": null,
+                    "options": [
+                        "All Challenges",
+                        "Boss Challenge",
+                        "Weekly Challenge"
+                    ],
+                    "sub_config": false,
+                    "value": "All Challenges",
+                    "option_labels": [
+                        "全部分类",
+                        "讨伐强敌",
+                        "战歌重奏"
+                    ],
+                    "visible_when": {
+                        "Farm Mode": "Cycle All Dungeons"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": "Boss Challenge",
+                    "description": "选择全部分类时，从此分类开始，之后继续另一分类。",
+                    "key": "Cycle Start Category",
+                    "kind": "select",
+                    "label": "起刷分类",
+                    "maximum": null,
+                    "minimum": null,
+                    "options": [
+                        "Boss Challenge",
+                        "Weekly Challenge"
+                    ],
+                    "sub_config": false,
+                    "value": "Boss Challenge",
+                    "option_labels": [
+                        "讨伐强敌",
+                        "战歌重奏"
+                    ],
+                    "visible_when": {
+                        "Farm Mode": "Cycle All Dungeons",
+                        "Cycle Scope": "All Challenges"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "按起刷分类从上到下计数：讨伐强敌 1～20，战歌重奏 1～9。轮到末尾后从头继续。",
+                    "key": "Cycle Start Index",
+                    "kind": "integer",
+                    "label": "起刷 Boss 序号",
+                    "maximum": 20,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Cycle All Dungeons"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "完成这些战斗轮数后切换到下一个 Boss；未掉落声骸也计一轮。",
+                    "key": "Rounds per Dungeon",
+                    "kind": "integer",
+                    "label": "每个副本刷取轮数",
+                    "maximum": 100000,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Cycle All Dungeons"
+                    }
+                },
+                {
+                    "allow_duplication": false,
                     "default": "No",
-                    "description": "在F2菜单中传送至Boss",
+                    "description": "选择分类后，在下方设置目标 Boss 的索拉指南序号；选“否”则在当前位置刷取。",
                     "key": "Teleport to Boss",
                     "kind": "select",
-                    "label": "传送至Boss",
+                    "label": "传送目标分类",
                     "maximum": null,
                     "minimum": null,
                     "option_labels": [
@@ -3362,7 +3567,61 @@
                         "Special Nightmare"
                     ],
                     "sub_config": true,
-                    "value": "No"
+                    "value": "No",
+                    "visible_when": {
+                        "Farm Mode": "Single Boss"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "F2 → 战歌重奏，按列表从上到下计数，第一项为 1。修改后自动保存，下次开始任务时生效。",
+                    "key": "Which Weekly Boss to Teleport",
+                    "kind": "integer",
+                    "label": "目标 Boss（战歌重奏序号）",
+                    "maximum": 9,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Single Boss",
+                        "Teleport to Boss": "Weekly Challenge"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "F2 → 讨伐强敌，按列表从上到下计数，第一项为 1。修改后自动保存，下次开始任务时生效。",
+                    "key": "Which Boss Challenge to Teleport",
+                    "kind": "integer",
+                    "label": "目标 Boss（讨伐强敌序号）",
+                    "maximum": 20,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Single Boss",
+                        "Teleport to Boss": "Boss Challenge"
+                    }
+                },
+                {
+                    "allow_duplication": false,
+                    "default": 1,
+                    "description": "F2 → 特殊梦魇，按列表从上到下计数，第一项为 1。修改后自动保存，下次开始任务时生效。",
+                    "key": "Which Special Nightmare to Teleport",
+                    "kind": "integer",
+                    "label": "目标 Boss（特殊梦魇序号）",
+                    "maximum": null,
+                    "minimum": 1,
+                    "options": null,
+                    "sub_config": false,
+                    "value": 1,
+                    "visible_when": {
+                        "Farm Mode": "Single Boss",
+                        "Teleport to Boss": "Special Nightmare"
+                    }
                 },
                 {
                     "allow_duplication": false,
@@ -3393,10 +3652,10 @@
                 {
                     "allow_duplication": false,
                     "default": "Other",
-                    "description": "选择Boss配置 (已包含战斗开始前等待时间)",
+                    "description": "设置特殊机制与开场等待，不决定传送目标。不在列表中的 Boss 选“其它”。",
                     "key": "Boss",
                     "kind": "select",
-                    "label": "首领选择",
+                    "label": "首领行为配置",
                     "maximum": null,
                     "minimum": null,
                     "option_labels": [
@@ -3422,7 +3681,10 @@
                         "Nameless Explorer"
                     ],
                     "sub_config": true,
-                    "value": "Other"
+                    "value": "Other",
+                    "visible_when": {
+                        "Farm Mode": "Single Boss"
+                    }
                 },
                 {
                     "allow_duplication": false,

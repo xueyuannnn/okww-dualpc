@@ -9,6 +9,7 @@ using namespace okww;
 namespace okww {
 struct WindowStartupTestAccess {
     static bool ready(const Window &window) { return window.engineReady_; }
+    static bool fieldsSaved(const Window &window) { return window.pendingFieldWrites_ == 0; }
     static void holdEngine(Window &window) { window.engineReady_ = false; window.engineLoadError_.clear(); }
     static bool waitingForEngine(const Window &window) {
         return window.pendingStart_ && window.pendingStart_->waitingForEngine;
@@ -60,6 +61,64 @@ class ClassicUiTests final : public QObject {
         return runtime::Profile(data.path() + "/configs-dualpc", root + "/native/resources/catalog.json");
     }
   private slots:
+    void bossDestinationIsSelectableAndPersistsSeparatelyFromBehavior_data() {
+        QTest::addColumn<QString>("task");
+        QTest::newRow("base") << QString("FarmEchoTask");
+        QTest::newRow("advanced") << QString("FarmEchoTask2");
+    }
+    void bossDestinationIsSelectableAndPersistsSeparatelyFromBehavior() {
+        QFETCH(QString, task);
+        QTemporaryDir data;
+        auto window = create(data);
+        QTRY_VERIFY(card(*window, task));
+        navigate(*window, "tasks");
+        auto taskCard = card(*window, task);
+        taskCard->setExpanded(true);
+        const auto choose = [&](const QString &key, const QString &value) {
+            auto combo = taskCard->body()->findChild<QComboBox *>("field-" + key);
+            QVERIFY(combo);
+            const int index = combo->findData(value);
+            QVERIFY(index >= 0);
+            combo->setCurrentIndex(index);
+            QVERIFY(QMetaObject::invokeMethod(combo, "activated", Q_ARG(int, index)));
+            QTRY_VERIFY(WindowStartupTestAccess::fieldsSaved(*window));
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        };
+        QVERIFY(!taskCard->body()->findChild<QSpinBox *>("field-Which Weekly Boss to Teleport"));
+        choose("Teleport to Boss", "Weekly Challenge");
+        QTRY_VERIFY(taskCard->body()->findChild<QSpinBox *>("field-Which Weekly Boss to Teleport"));
+        auto weekly = taskCard->body()->findChild<QSpinBox *>("field-Which Weekly Boss to Teleport");
+        QCOMPARE(weekly->minimum(), 1);
+        QCOMPARE(weekly->maximum(), 9);
+        weekly->setValue(7);
+        QVERIFY(QMetaObject::invokeMethod(weekly, "editingFinished"));
+        QTRY_COMPARE(profile(data).value(task, "Which Weekly Boss to Teleport").toInt(), 7);
+        QTRY_VERIFY(WindowStartupTestAccess::fieldsSaved(*window));
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        choose("Teleport to Boss", "Boss Challenge");
+        QTRY_VERIFY(taskCard->body()->findChild<QSpinBox *>("field-Which Boss Challenge to Teleport"));
+        auto boss = taskCard->body()->findChild<QSpinBox *>("field-Which Boss Challenge to Teleport");
+        QCOMPARE(boss->maximum(), 20);
+        boss->setValue(12);
+        QVERIFY(QMetaObject::invokeMethod(boss, "editingFinished"));
+        QTRY_COMPARE(profile(data).value(task, "Which Boss Challenge to Teleport").toInt(), 12);
+        QTRY_VERIFY(WindowStartupTestAccess::fieldsSaved(*window));
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCOMPARE(profile(data).value(task, "Which Weekly Boss to Teleport").toInt(), 7);
+        QCOMPARE(profile(data).value(task, "Boss").toString(), QString("Other"));
+        choose("Farm Mode", "Cycle All Dungeons");
+        QTRY_VERIFY(taskCard->body()->findChild<QSpinBox *>("field-Rounds per Dungeon"));
+        QCOMPARE(profile(data).value(task, "Which Boss Challenge to Teleport").toInt(), 12);
+        choose("Farm Mode", "Single Boss");
+        QTRY_VERIFY(taskCard->body()->findChild<QSpinBox *>("field-Which Boss Challenge to Teleport"));
+        QTRY_COMPARE(taskCard->body()->findChild<QSpinBox *>("field-Which Boss Challenge to Teleport")->value(), 12);
+        if (const auto output = qEnvironmentVariable("OKWW_UI_ARTIFACTS"); !output.isEmpty()) {
+            QDir().mkpath(output);
+            QTest::qWait(100);
+            taskCard->adjustSize();
+            taskCard->grab().save(output + "/boss-selection-" + task + ".png");
+        }
+    }
     void badTeamIsReportedWithoutBlockingStartupAndEngineWaitCanBeRetried() {
         QTemporaryDir data;
         const auto bad = data.path() + "/configs-dualpc/custom_teams/broken/team.json";
@@ -458,6 +517,8 @@ class ClassicUiTests final : public QObject {
         QTRY_VERIFY(card(*window, "AutoCombatTask"));
         const auto applied = readJson(data.path()+"/dualpc.json");
         QVERIFY(!window->findChild<QPushButton *>("saveDevices"));
+        auto imageMode=window->findChild<QComboBox *>("desktopRecognitionMode");
+        imageMode->setCurrentIndex(imageMode->findData("local"));
         window->findChild<QCheckBox *>("manualCapture")->setChecked(true);
         const QJsonObject values{{"capture.device_name", "Saved Capture"}, {"capture.device_index", 3},
             {"capture.width", 2560}, {"capture.height", 1440}, {"capture.fps", 165.},
@@ -490,6 +551,7 @@ class ClassicUiTests final : public QObject {
         };
         QTRY_VERIFY(draft()["manual_capture"].toBool());
         const Config saved{draft()["config"].toObject()};
+        QCOMPARE(saved.s("capture.recognition_mode"),QString("local"));
         QCOMPARE(saved.s("capture.fourcc"), QString("NV12"));
         for (auto it = values.begin(); it != values.end(); ++it) QCOMPARE(saved.get(it.key()), it.value());
         QCOMPARE(saved.get("capture.crop").toArray(), QJsonArray({50, 20, 1280, 720}));
@@ -512,6 +574,7 @@ class ClassicUiTests final : public QObject {
         restored->show();
         QTRY_VERIFY(card(*restored, "AutoCombatTask"));
         QVERIFY(restored->findChild<QCheckBox *>("manualCapture")->isChecked());
+        QCOMPARE(restored->findChild<QComboBox *>("desktopRecognitionMode")->currentData().toString(),QString("local"));
         QVERIFY(restored->findChild<QCheckBox *>("captureCrop")->isChecked());
         for (auto it = values.begin(); it != values.end(); ++it) {
             auto widget = restored->findChild<QWidget *>(it.key());
@@ -1752,7 +1815,7 @@ class ClassicUiTests final : public QObject {
         QVERIFY(!nest->isHidden());
         QVERIFY(daily->expanded());
         QVERIFY(empty->isHidden());
-        search->setText("进入BOSS");
+        search->setText("目标 Boss 序号");
         QVERIFY(!card(*window, "FarmEchoTask2")->isHidden());
         search->setText("there-is-no-such-task");
         QVERIFY(!empty->isHidden());
@@ -1848,6 +1911,9 @@ class ClassicUiTests final : public QObject {
         QCOMPARE(capture->count(),3);
         QCOMPARE(captureForms->currentIndex(),0);
         capture->setCurrentIndex(1); QCOMPARE(captureForms->currentIndex(),1);
+        auto recognition=window->findChild<QComboBox *>("desktopRecognitionMode");
+        QVERIFY(recognition && recognition->isVisible());QCOMPARE(recognition->count(),3);
+        QCOMPARE(recognition->currentData().toString(),QString("auto"));
         auto inputTarget=window->findChild<QComboBox *>("localInputTarget");
         auto inputBody=window->findChild<QWidget *>("sendInputAdvanced");
         auto inputAdvanced=inputBody ? inputBody->parentWidget()->findChild<QPushButton *>("disclosure",Qt::FindDirectChildrenOnly) : nullptr;

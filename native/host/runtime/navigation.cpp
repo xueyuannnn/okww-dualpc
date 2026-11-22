@@ -1,6 +1,7 @@
 #include "navigation.hpp"
 #include "combat_vision.hpp"
 #include "workflow_abi.hpp"
+#include "book_rows.hpp"
 namespace okww::runtime {
 namespace {
 [[noreturn]] void navigationError(int reason, const QString &name = {}) {
@@ -66,6 +67,7 @@ struct NavigationBridge {
     QPointF point;
     QVector<TextLine> lines;
     QVector<Match> rows;
+    QVector<BookRow> bookRows, previousBookRows;
     QVector<Match> waypoints;
     QString key(int index) {
         const QStringList names{"esc", "alt", "ctrl", "a", "backspace"};
@@ -241,6 +243,11 @@ struct NavigationBridge {
                     tab.reset();
                     break;
                 }
+                case rust::WorkflowOp::BookVisible:
+                    out[0] = !c.inTeam() && c.findAny({"gray_book_quest", "gray_book_boss",
+                        "gray_book_weekly", "gray_book_all_monsters"}, {.threshold=.75,
+                        .search=c.templates.box("box_gray_book",{c.frame.cols,c.frame.rows}),.grayscale=true}).has_value();
+                    break;
                 case rust::WorkflowOp::FindBookTab: {
                     tab = c.find(name,
                                  {.threshold = a[0],
@@ -311,6 +318,20 @@ struct NavigationBridge {
                     out[0] =
                         QStringList{"ningsu", "moni", "qiangdi", "wuyin", "zhange", "canxiang", "mengyan"}
                             .indexOf(name);
+                    break;
+                }
+                case rust::WorkflowOp::FindBookCategory: {
+                    const QHash<QString,QString> categories{
+                        {"ningsu","凝素领域|凝素領域|Forgery\\s*Challenge"},
+                        {"moni","模拟领域|模擬領域|Simulation\\s*Challenge"},
+                        {"qiangdi","讨伐强敌|討伐強敵|Boss\\s*Challenge"},
+                        {"wuyin","无音区|無音區|Tacet\\s*(?:Suppression|Fields?)"},
+                        {"zhange","战歌重奏|戰歌重奏|Weekly\\s*Challenge"},
+                        {"canxiang","残像聚落|殘像聚落|Tacet\\s*Discord\\s*Colon(?:y|ies)"},
+                        {"mengyan","特异梦魇|特異夢魘|Special\\s*Nightmare"}};
+                    label=matchingText(c.text(.08,.18,.37,.90,.65),"^(?:"+categories.value(name)+")$");
+                    found=label ? std::optional<Match>{{"book_category",label->box,label->confidence}} : std::nullopt;
+                    out[0]=found.has_value();
                     break;
                 }
                 case rust::WorkflowOp::WaypointCandidates: {
@@ -452,19 +473,38 @@ struct NavigationBridge {
                     break;
                 }
                 case rust::WorkflowOp::ReadProceedRows: {
-                    rows = c.templates.find(
-                        c.frame, "boss_proceed",
-                        {.threshold = .8, .search = gameBox(c.frame, .9113, .229, .9613, .861), .limit = 0});
-                    std::sort(rows.begin(), rows.end(),
-                              [](const Match &a, const Match &b) { return a.box.y() < b.box.y(); });
+                    c.refresh();
+                    bookRows=readBookRows(c);
+                    rows.clear();
+                    for(const auto &row:bookRows)rows.append(row.button);
                     out[0] = double(rows.size());
                     break;
+                }
+                case rust::WorkflowOp::BookAtTop:
+                    out[0]=bookListAtTop(c,int(a[0]));
+                    break;
+                case rust::WorkflowOp::StoreBookRows:
+                    previousBookRows=bookRows;
+                    break;
+                case rust::WorkflowOp::CompareBookRows:
+                    out[0]=bookRowSimilarity(previousBookRows.at(int(a[0])),bookRows.at(int(a[1])));
+                    out[1]=(previousBookRows.at(int(a[0])).button.center().y()-bookRows.at(int(a[1])).button.center().y())/c.frame.rows;
+                    break;
+                case rust::WorkflowOp::BookSelectionFailure: {
+                    QJsonArray observed;
+                    for(const auto &row:bookRows)observed.append(QJsonObject{{"title",row.title},
+                        {"button",QJsonArray{row.button.box.x(),row.button.box.y(),row.button.box.width(),row.button.box.height()}}});
+                    if(c.diagnostic)c.diagnostic("索拉指南选行未确认",{{"requested_index",a[0]},
+                        {"total",a[1]},{"rows",observed},{"reason",a[2]}});
+                    throw NavigationFailure("索拉指南目标行未确认，已保留当前页面与选行记录");
                 }
                 case rust::WorkflowOp::LastRowAbove: {
                     out[0] = rows.back().box.y() < c.frame.rows * a[0];
                     break;
                 }
                 case rust::WorkflowOp::ClickProceedRow: {
+                    if(c.info)c.info("目标副本",QString(a[2]<0 ? "索拉指南末尾第 %1 项 · %2" : "索拉指南第 %1 项 · %2")
+                        .arg(int(std::abs(a[2]))).arg(bookRows.at(int(a[0])).title));
                     c.click(rows.at(int(a[0])), a[1]);
                     break;
                 }
@@ -571,9 +611,9 @@ void Navigation::exitRealm(double timeout) {
     NavigationBridge b{c_};
     b.run(rust::WorkflowMethod::ExitRealm, {timeout});
 }
-void Navigation::ensureMain(double timeout, bool back) {
+void Navigation::ensureMain(double timeout, bool back, bool allowBook) {
     NavigationBridge b{c_};
-    b.run(rust::WorkflowMethod::EnsureMain, {timeout, double(back)});
+    b.run(rust::WorkflowMethod::EnsureMain, {timeout, double(back), double(allowBook)});
 }
 Match Navigation::openBook(const QString &feature, bool reuseExisting) {
     NavigationBridge b{c_};
@@ -613,9 +653,9 @@ void Navigation::startChallenge() {
     NavigationBridge b{c_};
     b.run(rust::WorkflowMethod::StartChallenge);
 }
-bool Navigation::selectBookEntry(int serial, int total, const QVector<int> &structure) {
+bool Navigation::selectBookEntry(int serial, int total, const QVector<int> &structure, bool fromEnd) {
     NavigationBridge b{c_};
     b.structure = structure;
-    return b.run(rust::WorkflowMethod::SelectEntry, {double(serial), double(total)})[0] != 0;
+    return b.run(rust::WorkflowMethod::SelectEntry, {double(serial), double(total), double(fromEnd)})[0] != 0;
 }
 } // namespace okww::runtime

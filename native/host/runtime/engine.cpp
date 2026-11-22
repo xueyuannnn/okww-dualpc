@@ -3,6 +3,7 @@
 #include "diagnostics.hpp"
 #include "engine_abi.hpp"
 #include "resource_failure.hpp"
+#include "desktop.hpp"
 #include "scripts.hpp"
 #include "task_registry.hpp"
 #include <QtConcurrent>
@@ -792,13 +793,21 @@ void Engine::run(QString selected, uint64_t epoch, QJsonObject options) {
         });
         std::function<void()> pollControls;
         bool taskRunning = false;
+        Input *activeInput=nullptr;
         Execution execution(gate_, epoch, clock, [&] {
             QJsonObject state;
             rust::engineRun(rust::EngineMethod::Health, [&](rust::EngineOp op, const double *a, double *out,
                                                             const std::exception_ptr &error) {
                 switch (op) {
                 case rust::EngineOp::Heartbeat: {
-                    out[0] = backend_.heartbeat();
+                    bool alive=backend_.heartbeat();
+                    if(!alive && gate_.active(epoch) && backend_.tryRecoverTaskHeartbeat()) {
+                        if(activeInput)activeInput->release();
+                        log("任务心跳已恢复，画面与键鼠连接正常，继续当前任务。");
+                        emit message({{"event","input_recovered"}});
+                        alive=true;
+                    }
+                    out[0] = alive;
                     break;
                 }
                 case rust::EngineOp::GateActive: {
@@ -877,6 +886,7 @@ void Engine::run(QString selected, uint64_t epoch, QJsonObject options) {
         Input input(
             config, {frame->width, frame->height}, backend_.snapshot()["box"].toObject()["absolute"].toBool(),
             [&](auto command) { return backend_.nativeCommand(command); }, execution);
+        activeInput=&input;
         Templates activeTemplates(*templates_);
         activeTemplates.setCheckpoint([&] { execution.checkpoint(); });
         const auto userTemplates = data_ + "/ok_templates/coco_annotations.json";
@@ -917,6 +927,23 @@ void Engine::run(QString selected, uint64_t epoch, QJsonObject options) {
             });
         QJsonObject progressState;
         context.streamedCapture = config.s("capture.source") == "desktop";
+        context.desktopRecognitionMode=config.s("capture.recognition_mode");
+        QJsonObject imageEnvironment;
+        i64 environmentRead=0;
+        context.desktopEnvironment=[&] {
+            if(nowNs()-environmentRead<1000000000LL)return imageEnvironment;
+            environmentRead=nowNs();
+            // Explicit capture identity takes precedence over the foreground.
+            // This selects recognition policy only; capture geometry is unchanged.
+            auto target=config.get("capture.local_target").toObject();
+            if(config.s("capture.local_backend")!="WIN32" || target["kind"]!="window")
+                target={};
+            if(target.isEmpty() && config.b("kmbox.target_enabled"))
+                target=config.get("kmbox.target").toObject();
+            imageEnvironment=target.isEmpty() ? localInputEnvironment() : target;
+            return imageEnvironment;
+        };
+        if(context.streamedCapture)context.observeDesktopImage(context.desktopEnvironment());
         double lastProgress = -1;
         const auto publishProgress = [&](QJsonObject patch) {
             QString task;

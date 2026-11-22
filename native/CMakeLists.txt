@@ -154,6 +154,7 @@ if(OKWW_FULL_NATIVE)
         host/runtime/characters_additional.cpp
         host/runtime/gauge_analysis.cpp
         host/runtime/navigation.cpp
+        host/runtime/book_rows.cpp
         host/runtime/stamina.cpp
         host/runtime/echo_detector.cpp
         host/runtime/interaction.cpp
@@ -225,6 +226,10 @@ if(OKWW_FULL_NATIVE)
     target_link_libraries(navigation_contract_tests PRIVATE okww_runtime Qt6::Test)
     target_compile_definitions(navigation_contract_tests PRIVATE OKWW_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/..")
     add_test(NAME navigation_contract_tests COMMAND navigation_contract_tests -o "${CMAKE_BINARY_DIR}/navigation-contract-tests.txt,txt")
+    add_executable(book_navigation_tests tests/test_book_navigation.cpp)
+    target_link_libraries(book_navigation_tests PRIVATE okww_runtime Qt6::Test)
+    target_compile_definitions(book_navigation_tests PRIVATE OKWW_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/..")
+    add_test(NAME book_navigation_tests COMMAND book_navigation_tests -o "${CMAKE_BINARY_DIR}/book-navigation-tests.txt,txt")
     add_executable(domain_contract_tests tests/test_domain_contract.cpp)
     target_link_libraries(domain_contract_tests PRIVATE okww_runtime Qt6::Test)
     add_test(NAME domain_contract_tests COMMAND domain_contract_tests -o "${CMAKE_BINARY_DIR}/domain-contract-tests.txt,txt")

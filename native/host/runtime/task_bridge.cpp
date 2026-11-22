@@ -130,9 +130,10 @@ std::array<double, 3> TaskContext::rustRun(int method, std::initializer_list<dou
                     static const QStringList names{"char_1_text", "char_2_text", "char_3_text"};
                     if (a[1] == 2) {
                         double score = 0;
-                        for (double scale : {1., .9, 1.1})
+                        const auto scales=c.localDesktopGame ? std::array{1.,.96,1.04} : std::array{1.,.9,1.1};
+                        for (double scale : scales)
                             if (auto match = c.find(names.at(int(a[0])), {.threshold = 0, .horizontal = .006,
-                                    .vertical = .012, .grayscale = true, .templateScale = scale, .blurSigma = .6}))
+                                    .vertical = .012, .grayscale = true, .templateScale = scale, .blurSigma = c.localDesktopGame ? .3 : .6}))
                                 score = std::max(score, match->confidence);
                         context.remoteScores[int(a[0])] = score;
                         out[0] = score >= .8;
@@ -145,11 +146,11 @@ std::array<double, 3> TaskContext::rustRun(int method, std::initializer_list<dou
                                                                      .horizontal = .006,
                                                                      .vertical = .012,
                                                                      .grayscale = true,
-                                                                     .blurSigma = .9}));
+                                                                     .blurSigma = c.localDesktopGame ? .3 : .9}));
                     break;
                 }
                 case rust::TaskOp::RemotePartyState:
-                    c.partyObservation = {{"source", "remote"}, {"marker_mask", int(a[0])}};
+                    c.partyObservation = {{"source", c.localDesktopGame ? "local" : "remote"}, {"marker_mask", int(a[0])}};
                     c.partyObservation["fallback_scores"] = context.remoteScores;
                     out[0] = c.knownRemotePartySize_;
                     out[1] = c.lastRemotePartySeen_ < 0 ? -1 : c.execution.now() - c.lastRemotePartySeen_;

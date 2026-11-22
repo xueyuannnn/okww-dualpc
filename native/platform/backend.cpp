@@ -254,6 +254,7 @@ Backend::~Backend() {
 }
 void Backend::start(const Config &cfg, bool simulation) {
     std::lock_guard lock(mutex_);
+    heartbeatRecoveryAllowed_=false;
     BackendLifecycleSdk sdk{*this};
     sdk.config = &cfg;
     sdk.simulation = simulation;
@@ -292,6 +293,7 @@ bool Backend::configurationMatches(const Config &cfg) const {
 }
 void Backend::stop() {
     std::lock_guard lock(mutex_);
+    heartbeatRecoveryAllowed_=false;
     BackendLifecycleSdk sdk{*this};
     rust::platformWorkflowRun(rust::WorkflowMethod::BackendStop, {}, sdk);
 }
@@ -502,6 +504,7 @@ struct BackendFramesSdk {
                      {"input_fault", b.inputFault_},
                      {"age_ms", frame ? double(nowNs() - frame->captured) / 1e6 : -1.0},
                      {"simulation", b.simulation_}};
+            if(!b.lastHeartbeatRecovery_.isEmpty())value["heartbeat_recovery"]=b.lastHeartbeatRecovery_;
             break;
         default:
             fail("Rust 后台画面与故障宿主无效");
@@ -523,6 +526,8 @@ bool Backend::recoverCaptureLocked() {
     return rust::platformWorkflowRun(rust::WorkflowMethod::BackendRecoverCapture, {}, sdk)[0] != 0;
 }
 void Backend::disarmFaultLocked(const QString &reason, const QString &message) {
+    heartbeatRecoveryAllowed_=reason=="heartbeat_timeout";
+    heartbeatFaultAt_=heartbeatRecoveryAllowed_ ? nowNs() : 0;
     BackendFramesSdk sdk{*this};
     sdk.reason = &reason;
     sdk.message = &message;
@@ -582,6 +587,28 @@ struct BackendControlSdk {
         case rust::WorkflowOp::BackendControlHeartbeatNow:
             b.heartbeat_ = nowNs();
             break;
+        case rust::WorkflowOp::HeartbeatRecoveryAllowed:
+            out[0]=b.heartbeatRecoveryAllowed_ && b.running_ && b.inputFault_["reason"]=="heartbeat_timeout";
+            break;
+        case rust::WorkflowOp::HeartbeatRecoveryAgeMs:
+            out[0]=b.heartbeatFaultAt_ ? double(nowNs()-b.heartbeatFaultAt_)/1e6 : 1e9;
+            break;
+        case rust::WorkflowOp::HeartbeatRecoveryLimited:
+            out[0]=b.heartbeatRecoveryWindow_ && nowNs()-b.heartbeatRecoveryWindow_<60000000000LL && b.heartbeatRecoveries_>=3;
+            break;
+        case rust::WorkflowOp::CommitHeartbeatRecovery: {
+            const auto now=nowNs();
+            if(!b.heartbeatRecoveryWindow_ || now-b.heartbeatRecoveryWindow_>=60000000000LL) {
+                b.heartbeatRecoveryWindow_=now;b.heartbeatRecoveries_=0;
+            }
+            const auto fault=b.inputFault_;
+            const auto gap=double(now-b.heartbeat_)/1e6;
+            b.arm(true);
+            ++b.heartbeatRecoveries_;
+            b.lastHeartbeatRecovery_={{"count_in_window",b.heartbeatRecoveries_},{"heartbeat_gap_ms",gap},
+                {"timestamp",QDateTime::currentDateTime().toString(Qt::ISODateWithMs)},{"fault",fault}};
+            break;
+        }
         case rust::WorkflowOp::BackendControlResetRecovery:
             b.captureRecoveryBegan_ = 0;
             break;
@@ -654,6 +681,7 @@ struct BackendControlSdk {
 };
 void Backend::arm(bool enabled) {
     std::lock_guard lock(mutex_);
+    heartbeatRecoveryAllowed_=false;
     BackendControlSdk sdk{*this};
     sdk.enabled = enabled;
     rust::platformWorkflowRun(rust::WorkflowMethod::BackendArm, {}, sdk);
@@ -662,6 +690,11 @@ bool Backend::heartbeat() {
     std::lock_guard lock(mutex_);
     BackendControlSdk sdk{*this};
     return rust::platformWorkflowRun(rust::WorkflowMethod::BackendHeartbeat, {}, sdk)[0] != 0;
+}
+bool Backend::tryRecoverTaskHeartbeat() {
+    std::lock_guard lock(mutex_);
+    BackendControlSdk sdk{*this};
+    return rust::platformWorkflowRun(rust::WorkflowMethod::BackendResumeTaskHeartbeat,{},sdk)[0]!=0;
 }
 QJsonObject Backend::testMove() {
     std::lock_guard lock(mutex_);

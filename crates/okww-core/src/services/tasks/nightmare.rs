@@ -146,7 +146,7 @@ impl Host {
                 if need_find && !dropped {
                     dropped = self.flag(Op::NestFindEcho, &[30.])?;
                     if !dropped && !team {
-                        self.action(Op::NavEnsureMain, &[30.])?;
+                        self.action(Op::NavPrepareBook, &[30.])?;
                         self.action(Op::OpenBossBook, &[])?;
                         self.nest_tab(self.scalar(Op::NestTargetTab, &[])?)?;
                         self.action(Op::Sleep, &[1.])?;
@@ -196,7 +196,7 @@ impl Host {
                 self.action(Op::LeaveNest, &[])?;
             }
             self.action(Op::RecoverStartingPopup, &[])?;
-            self.action(Op::NavEnsureMain, &[30.])?;
+            self.action(Op::NavPrepareBook, &[30.])?;
             self.action(
                 Op::ReadNestConfig,
                 &[self.flag(Op::NestSuppliedEmpty, &[])? as u8 as f64],

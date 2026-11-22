@@ -29,8 +29,7 @@ impl Host {
         } else {
             self.action(Op::NavCategory, &[2.])?;
             let index = self.scalar(Op::MaterialKind, &[])?;
-            self.action(Op::ClickRelative, &[0.973, 0.8806, 1.])?;
-            self.action(Op::ClickRelative, &[0.898, 0.533 + index * 0.14, 1.])?;
+            self.action(Op::NavFarmEntry, &[2., 3. - index])?;
             self.action(Op::ClickRelative, &[0.93, 0.90, 1.])?;
         }
         self.action(Op::NavStartChallenge, &[])?;
@@ -69,7 +68,7 @@ impl Host {
     fn domain_run(&self, kind: f64, counted: bool) -> Result {
         self.action(Op::DomainTaskScope, &[kind, counted as u8 as f64, 0.])?;
         self.action(Op::RecoverStartingPopup, &[])?;
-        self.action(Op::NavEnsureMain, &[180.])?;
+        self.action(Op::NavPrepareBook, &[180.])?;
         self.action(Op::Sleep, &[0.5])?;
         self.action(Op::ReadFarmConfig, &[])?;
         let mut must_use = 0;
@@ -78,19 +77,19 @@ impl Host {
             if requested <= 0 {
                 return Ok(());
             }
-            self.action(Op::OpenBossBook, &[0.])?;
+            self.action(Op::OpenBossBook, &[1.])?;
             let stamina = self.call(Op::ReadStamina, &[])?;
             let cost = Self::domain_cost(kind);
             must_use = self.domain_limit(requested, stamina[2] as i32, cost)? * cost;
-            self.action(Op::NavEnsureMain, &[30.])?;
             if must_use == 0 {
+                self.action(Op::NavEnsureMain, &[30.])?;
                 self.action(Op::StoreFarmResult, &[0., 0., 0., 1.])?;
                 return Ok(());
             }
         }
         self.action(Op::CallFarm, &[kind, must_use as f64, counted as u8 as f64])
     }
-    fn domain_farm(&self, kind: f64, mut must_use: i32, exact: bool, reuse_book: bool) -> Result {
+    fn domain_farm(&self, kind: f64, mut must_use: i32, exact: bool, _reuse_book: bool) -> Result {
         self.action(Op::DomainTaskScope, &[kind, exact as u8 as f64, 1.])?;
         if !(0..=24000000).contains(&must_use) {
             self.fail(102.)?;
@@ -107,7 +106,7 @@ impl Host {
         let mut entry_at_heal = false;
         loop {
             self.action(Op::Checkpoint, &[])?;
-            self.action(Op::OpenBossBook, &[reuse_book as u8 as f64])?;
+            self.action(Op::OpenBossBook, &[1.])?;
             let mut stamina = self.call(Op::ReadStamina, &[])?;
             if stamina[0] < 0. && kind == 0. {
                 self.action(Op::ClickRelative, &[0.04, 0.4, 1.])?;

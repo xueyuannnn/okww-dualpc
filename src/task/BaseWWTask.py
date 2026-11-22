@@ -714,7 +714,17 @@ class BaseWWTask(BaseTask):
         self.click(cancel, after_sleep=2)
         return cancel
 
-    def ensure_main(self, esc=True, time_out=30):
+    def book_is_open(self):
+        if self.in_team()[0]:
+            return False
+        return self.find_one(['gray_book_quest', 'gray_book_boss', 'gray_book_weekly',
+                              'gray_book_all_monsters'], box='box_gray_book',
+                             threshold=.75, use_gray_scale=True)
+
+    def ensure_main(self, esc=True, time_out=30, allow_book=False):
+        if allow_book and self.book_is_open():
+            self.logged_in = True
+            return True
         self.info_set('current task', f'wait main esc={esc}')
         if not self.logged_in:
             time_out = 600
@@ -1023,6 +1033,21 @@ class BaseWWTask(BaseTask):
 
     def open_boss_book(self, name, after_sleep=2):
         self.log_info(f'open_boss_book {name}')
+        categories = {
+            'ningsu': r'凝素领域|凝素領域|Forgery\s*Challenge',
+            'moni': r'模拟领域|模擬領域|Simulation\s*Challenge',
+            'qiangdi': r'讨伐强敌|討伐強敵|Boss\s*Challenge',
+            'wuyin': r'无音区|無音區|Tacet\s*(?:Suppression|Fields?)',
+            'zhange': r'战歌重奏|戰歌重奏|Weekly\s*Challenge',
+            'canxiang': r'残像聚落|殘像聚落|Tacet\s*Discord\s*Colon(?:y|ies)',
+            'mengyan': r'特异梦魇|特異夢魘|Special\s*Nightmare',
+        }
+        if name in categories:
+            labels = self.ocr(box=self.box_of_screen(.08, .18, .37, .90), threshold=.65,
+                              match=re.compile(r'^(?:' + categories[name] + r')$', re.I))
+            if len(labels) == 1:
+                self.click(labels[0], after_sleep=after_sleep)
+                return
         x = 0.24
         self.sleep(0.4)
         if name == 'ningsu':
@@ -1047,6 +1072,11 @@ class BaseWWTask(BaseTask):
     def openF2Book(self, feature="gray_book_all_monsters"):
         if hasattr(self, 'reset_to_false'):
             self.reset_to_false('opening book')
+        if self.book_is_open():
+            tab = self.find_one(feature, box='box_gray_book', threshold=.65, use_gray_scale=True)
+            if tab:
+                self.click_box(tab, after_sleep=.6)
+                return tab
         self.ensure_main()
         book_key = self.key_config.get('Guidebook Key', self.key_config.get('索拉指南', 'f2'))
         self.log_info(f'click {book_key} to open the book')
@@ -1181,74 +1211,9 @@ class BaseWWTask(BaseTask):
         self.draw_boxes(boxes=bar, color="red")
         return bar.y / self.height
 
-    def click_on_book_target(self, serial_number: int, total_number: int, structure: list[int] = None):
-        def get_cross_count(structure, sn):
-            current_sum = 0
-            cross_count = 0
-            for s in structure:
-                current_sum += s
-                if sn > current_sum:
-                    cross_count += 1
-                else:
-                    break
-            return cross_count
-
-        self.sleep(0.5)
-        bar_bottom = 0.8806
-        bar_x = 0.9730
-        header_h = 0.028  # calibrated header height (~40px @1440), replaces separator=0.01
-        cross_count = 0
-        container_max_rows = 4
-        target_index = -1
-
-        bar_top = self._find_book_scroll_top()
-
-        if serial_number <= container_max_rows:
-            target_index = serial_number - 1
-        else:
-            calib_cross = get_cross_count(structure, serial_number) if structure else 0
-            calib_container_h = (bar_bottom - bar_top - (len(structure) - 1) * header_h) if structure else (
-                        bar_bottom - bar_top)
-            calib_item_h = calib_container_h / total_number if total_number else 0
-            calib_y = min(bar_top + calib_item_h * serial_number + calib_cross * header_h, bar_bottom)
-            to_click_y = calib_y
-            item_h = calib_item_h
-            self.click(bar_x, to_click_y, after_sleep=1)
-        btns = self.find_feature('boss_proceed', box=self.box_of_screen(0.9113, 0.229, 0.9613, 0.861), threshold=0.8)
-        # adaptive retry: closed-loop correction for residual underscroll (found 3/4 with low max_y)
-        if not target_index > -1 and btns and len(btns) in (3, 4) and structure and serial_number > container_max_rows:
-            max_y = max(b.y / self.height for b in btns)
-            if max_y < 0.73:
-                retry_y = min(to_click_y + item_h * 0.55, bar_bottom) if 'item_h' in locals() and item_h else min(
-                    to_click_y + 0.018, bar_bottom)
-                self.click(bar_x, retry_y, after_sleep=1)
-                btns = self.find_feature('boss_proceed', box=self.box_of_screen(0.9113, 0.229, 0.9613, 0.861),
-                                         threshold=0.8)
-        if not btns:
-            raise Exception("can't find boss_proceed")
-        if target_index > -1:
-            if target_index < len(btns):
-                target = btns[target_index]
-            else:
-                # Fallback: not enough visible rows, scroll with calibrated header
-                calib_cross2 = get_cross_count(structure, serial_number) if structure else 0
-                calib_h2 = (bar_bottom - bar_top - (len(structure) - 1) * header_h) if structure else (
-                            bar_bottom - bar_top)
-                calib_y2 = min(bar_top + (calib_h2 / total_number) * serial_number + calib_cross2 * header_h,
-                               bar_bottom) if total_number else bar_bottom
-                self.click(bar_x, calib_y2, after_sleep=1)
-                btns = self.find_feature('boss_proceed', box=self.box_of_screen(0.9113, 0.229, 0.9613, 0.861),
-                                         threshold=0.8)
-                if not btns:
-                    raise Exception("can't find boss_proceed after scroll")
-                target = max(btns, key=lambda box: box.y)
-        else:
-            target = max(btns, key=lambda box: box.y)
-        self.draw_boxes(boxes=target, color="red")
-        self.click(target, after_sleep=1)
-        feature = self.wait_feature(['fast_travel_custom', 'gray_teleport', 'remove_custom', 'team_close'], time_out=10,
-                                    settle_time=0.5, raise_if_not_found=True)
-        return feature.name == 'team_close'
+    def click_on_book_target(self, serial_number: int, total_number: int, structure: list[int] = None, from_end=False):
+        from dualpc.book_navigation import select_book_target
+        return select_book_target(self, serial_number, total_number, from_end=from_end)
 
     def change_time_to_night(self):
         logger.info('change time to night')

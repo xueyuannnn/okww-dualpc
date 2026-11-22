@@ -1,5 +1,6 @@
 #include "task.hpp"
 #include "task_abi.hpp"
+#include "desktop_input_abi.hpp"
 #include <opencv2/imgproc.hpp>
 namespace okww::runtime {
 void TaskContext::beginWorkflow(QJsonArray steps, QString timingPath) {
@@ -17,7 +18,24 @@ TaskContext::TaskContext(Execution &e, Input &i, Templates &t, Profile &p, Frame
                          TextReader reader)
     : source_(std::move(source)), textReader_(std::move(reader)), execution(e), input(i), templates(t),
       profile(p) {}
-void TaskContext::refresh() { rustRun(int(rust::TaskMethod::Refresh)); }
+void TaskContext::observeDesktopImage(const QJsonObject &environment) {
+    if (!streamedCapture) return;
+    const auto executable=environment.value("exe").toString(environment.value("executable").toString()).toUtf8();
+    const int kind=rust::okww_rs_desktop_recognition(reinterpret_cast<const uint8_t *>(executable.constData()),size_t(executable.size()));
+    const bool previous=localDesktopGame;
+    if(desktopRecognitionMode=="local")localDesktopGame=true;
+    else if(desktopRecognitionMode=="remote")localDesktopGame=false;
+    else if(kind!=0)localDesktopGame=kind==1;
+    if(kind!=0 || !environment.isEmpty())recognitionEnvironment=environment;
+    if(previous!=localDesktopGame) {
+        remotePartyVersion_=UINT64_MAX;
+        knownRemotePartySize_=0;lastRemotePartySeen_=-1;
+    }
+}
+void TaskContext::refresh() {
+    if(streamedCapture && desktopEnvironment)observeDesktopImage(desktopEnvironment());
+    rustRun(int(rust::TaskMethod::Refresh));
+}
 void TaskContext::sleep(double seconds) { rustRun(int(rust::TaskMethod::Sleep), {seconds}); }
 
 QVector<TextLine> TaskContext::text(double x, double y, double right, double bottom, double threshold) {
@@ -38,10 +56,11 @@ bool TaskContext::canBackToWorld() {
         {.threshold = .82, .grayscale = true, .blurSigma = .6}).has_value();
 }
 PartyHud TaskContext::party() {
-    if (streamedImage() && remotePartyVersion_ == frameVersion && remotePartySize_ == frame.size())
+    const bool guarded=streamedCapture || streamedImage();
+    if (guarded && remotePartyVersion_ == frameVersion && remotePartySize_ == frame.size())
         return remoteParty_;
-    const auto result = rustRun(int(streamedImage() ? rust::TaskMethod::RemoteParty : rust::TaskMethod::Party));
-    if (streamedImage()) {
+    const auto result = rustRun(int(guarded ? rust::TaskMethod::RemoteParty : rust::TaskMethod::Party));
+    if (guarded) {
         remotePartyVersion_ = frameVersion;
         remotePartySize_ = frame.size();
         remoteParty_ = {result[0] != 0, int(result[1]), int(result[2])};

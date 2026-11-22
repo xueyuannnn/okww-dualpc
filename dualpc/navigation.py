@@ -5,7 +5,7 @@ from .echo_rotation import farm_setting
 
 START_CHALLENGE = re.compile(r"^(?:开启挑战|开始挑战|開啟挑戰|開始挑戰|Start\s*Challenge)$", re.IGNORECASE)
 NO_ECHO_DROP = re.compile(r"无法掉落任何声骸|無法掉落任何聲骸|(?:no|cannot\s+drop)\s+(?:any\s+)?echo", re.IGNORECASE)
-BOOK_TRANSITION_FEATURES = ["fast_travel_custom", "gray_teleport", "remove_custom", "team_close"]
+BOOK_TRANSITION_FEATURES = ["fast_travel_custom", "gray_teleport", "remove_custom", "team_start_challenge", "team_close"]
 EARLY_ACCESS_WARNING = re.compile(r"提前到[达達]目[标標]位置可能影[响響]剧情[体體][验驗].*是否[确確][认認]前往")
 
 

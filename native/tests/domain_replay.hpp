@@ -159,6 +159,17 @@ struct Probe {
                                  .toInt(1);
                     break;
                 case O::NavFarmEntry:
+                    if(int(a[0])==2) {
+                        // The legacy lifecycle fixture models the old SDK's
+                        // material selection latency; verify the new tail index
+                        // before replaying that opaque UI action.
+                        const auto selection=std::as_const(data)["Material Selection"].toString("Shell Credit");
+                        const int index=selection=="Resonator EXP"?0:selection=="Weapon EXP"?1:2;
+                        if(int(a[1])!=3-index)fail("Simulation material tail index changed");
+                        c.clickRelative(.973,.8806,1);
+                        c.clickRelative(.898,.533+index*.14,1);
+                        break;
+                    }
                     nav.selectBookEntry(int(a[1]), a[0] == 0 ? 21 : 20,
                                         a[0] == 0 ? QVector<int>{4, 5, 5, 7} : QVector<int>{5, 5, 5, 5});
                     break;
@@ -173,6 +184,7 @@ struct Probe {
                 case O::NavWaitTeam:
                     nav.waitTeam(a[0]);
                     break;
+                case O::NavPrepareBook:
                 case O::NavEnsureMain:
                     nav.ensureMain(a[0]);
                     break;

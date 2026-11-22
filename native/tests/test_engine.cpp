@@ -2,6 +2,7 @@
 #include "runtime/scripts.hpp"
 #include "runtime/workshop.hpp"
 #include <QtTest>
+#include "backend_capture_fixture.hpp"
 using namespace okww;
 using namespace okww::runtime;
 static Config simulationConfig() {
@@ -12,6 +13,30 @@ static Config simulationConfig() {
 class EngineTests final : public QObject {
     Q_OBJECT
   private slots:
+    void taskProgressAfterHeartbeatStallResumesWithoutReportingFatalError() {
+        const QString root=OKWW_SOURCE_ROOT;QTemporaryDir data;
+        writeJson(data.path()+"/dualpc.json",simulationConfig().json);
+        Profile profile(data.path()+"/configs-dualpc",root+"/native/resources/catalog.json");
+        for(const auto &value:profile.catalog()["tasks"].toArray()) {
+            const auto task=value.toObject();
+            if(task["trigger"].toBool())profile.set(task["id"].toString(),"_enabled",false);
+        }
+        Backend backend(false);backend.start(Config::defaults(),true);
+        Engine engine(backend,root,data.path());int recovered=0,errors=0;
+        connect(&engine,&Engine::message,&engine,[&](QJsonObject event){
+            if(event["event"]=="input_recovered")++recovered;
+            if(event["event"]=="error")++errors;
+        });
+        engine.load();engine.command({{"op","start"}});
+        QTRY_VERIFY_WITH_TIMEOUT(backend.snapshot()["armed"].toBool(),30000);
+        BackendCaptureFixture::heartbeatStall(backend);
+        QTRY_COMPARE_WITH_TIMEOUT(recovered,1,5000);
+        QVERIFY(backend.snapshot()["armed"].toBool());QVERIFY(!engine.idle());QCOMPARE(errors,0);
+        engine.command({{"op","pause"}});
+        QTRY_VERIFY_WITH_TIMEOUT(engine.idle(),5000);
+        QVERIFY(!backend.snapshot()["armed"].toBool());QVERIFY(!backend.tryRecoverTaskHeartbeat());
+        QCOMPARE(recovered,1);QCOMPARE(errors,0);
+    }
     void foregroundCompletionAndCancellationReturnToEnabledTriggers() {
         const QString root = OKWW_SOURCE_ROOT;
         QTemporaryDir data;

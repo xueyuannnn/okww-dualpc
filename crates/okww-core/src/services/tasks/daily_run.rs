@@ -75,7 +75,7 @@ impl Host {
         self.action(Op::BeginDailyRunWorkflow, &[])?;
         self.action(Op::DailyEnterGameRunning, &[])?;
         self.action(Op::ResetDailyLoggedIn, &[])?;
-        self.action(Op::NavEnsureMain, &[180.])?;
+        self.action(Op::NavPrepareBook, &[180.])?;
         self.action(Op::DailyEnterGameCompleted, &[])?;
         if !self.flag(Op::StageDailyRunInitialClaim, &[])? {
             self.action(Op::DailyRunFailure, &[0.])?;

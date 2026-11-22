@@ -45,7 +45,7 @@ class NightmareNestTask(WWOneTimeTask, BaseCombatTask):
         self._unreachable_nests.clear()
         self._nest_deaths.clear()
         WWOneTimeTask.run(self)
-        self.ensure_main(time_out=30)
+        self.ensure_main(time_out=30, allow_book=True)
         self._init_queue()
         self.log_info('opened gray_book_boss')
         while nest := self.get_nest_to_go():
@@ -58,7 +58,7 @@ class NightmareNestTask(WWOneTimeTask, BaseCombatTask):
         self._unreachable_nests.clear()
         self._nest_deaths.clear()
         WWOneTimeTask.run(self)
-        self.ensure_main(time_out=30)
+        self.ensure_main(time_out=30, allow_book=True)
         self._init_queue()
         self.log_info('opened gray_book_boss')
         while nest := self.get_nest_to_go():
@@ -128,7 +128,7 @@ class NightmareNestTask(WWOneTimeTask, BaseCombatTask):
                     if not dropped and not is_team:
                         # 保底：没有收取到声骸时，重新打开图鉴传送回当前聚落（传送点面朝金色声骸群），再搜索一次
                         self.log_info('no echo collected, re-teleport to current nest as fallback')
-                        self.ensure_main(time_out=30)
+                        self.ensure_main(time_out=30, allow_book=True)
                         self.openF2Book("gray_book_boss")
                         getattr(self, self._nest_tab_of_current_nest)()
                         self.sleep(1)

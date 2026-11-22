@@ -20,6 +20,10 @@ class Backend {
     QString error_;
     QJsonObject inputFault_;
     i64 heartbeat_ = 0;
+    bool heartbeatRecoveryAllowed_ = false;
+    i64 heartbeatFaultAt_ = 0, heartbeatRecoveryWindow_ = 0;
+    int heartbeatRecoveries_ = 0;
+    QJsonObject lastHeartbeatRecovery_;
     i64 captureRecoveryBegan_ = 0;
     static constexpr i64 captureRecoveryTimeoutNs = 120000000000LL;
     FramePtr simulated_;
@@ -48,6 +52,7 @@ class Backend {
     void stop();
     void arm(bool enabled);
     bool heartbeat();
+    bool tryRecoverTaskHeartbeat();
     QJsonObject testMove();
     bool physicalKeyDown(int vk);
     bool physicalHotkey(int vk);

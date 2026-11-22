@@ -47,7 +47,7 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
                                     time_out=3, click_after_delay=0.5, threshold=0.7, after_sleep=1)
             self.wait_in_team_and_world(time_out=self.teleport_timeout)
         else:
-            self.ensure_main()
+            self.ensure_main(allow_book=True)
 
     def open_F2_book_and_get_stamina(self):
         self.openF2Book('gray_book_boss')

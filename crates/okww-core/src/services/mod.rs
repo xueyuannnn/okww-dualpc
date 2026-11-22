@@ -618,6 +618,7 @@ impl Host {
             | Method::BackendSnapshot => self.run_backend_frames(method),
             Method::BackendArm
             | Method::BackendHeartbeat
+            | Method::BackendResumeTaskHeartbeat
             | Method::BackendTestMove
             | Method::BackendPhysicalDown
             | Method::BackendPhysicalHotkey => self.run_backend_control(method),

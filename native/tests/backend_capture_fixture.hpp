@@ -5,6 +5,15 @@ namespace okww {
 // Exercise the real input guard and watchdog with published capture frames,
 // without opening a device or sending any Windows/USB input.
 struct BackendCaptureFixture {
+    static void heartbeatStall(Backend &backend,double gapMs=3310.) {
+        std::lock_guard lock(backend.mutex_);
+        backend.heartbeat_=nowNs()-i64(gapMs*1e6);
+        backend.disarmFaultLocked("heartbeat_timeout","任务心跳超过 1500 毫秒未更新");
+    }
+    static void expireHeartbeatRecovery(Backend &backend) {
+        std::lock_guard lock(backend.mutex_);
+        backend.heartbeatFaultAt_=nowNs()-10001000000LL;
+    }
     Backend backend{false};
     explicit BackendCaptureFixture(Config config = Config::defaults()) {
         backend.start(config, true);

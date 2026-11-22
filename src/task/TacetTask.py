@@ -41,8 +41,7 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
 
     def run(self):
         super().run()
-        self.ensure_main(time_out=180)
-        self.wait_in_team_and_world(esc=True)
+        self.ensure_main(time_out=180, allow_book=True)
         self.farm_tacet()
 
     def farm_tacet(self, daily=False, used_stamina=0, config=None, max_recovery_retries=3):

@@ -188,6 +188,29 @@ class RuntimeTests : public QObject {
         c.streamedCapture=true;QVERIFY(vision.healthBar(true));
         profile.set("Cloud Game","Compressed Image Tolerance",false);QVERIFY(!vision.healthBar(true));
     }
+    void desktopRecognitionKeepsLocalRemoteAndUnknownWindowsSeparate() {
+        Harness h;QTemporaryDir data;const auto root=QString(OKWW_SOURCE_ROOT);
+        Templates templates(root+"/assets/coco_annotations.json");
+        Profile profile(data.path(),root+"/native/resources/catalog.json");
+        Input input(h.config,{1920,1080},true,h.transport,h.execution);
+        TaskContext c(h.execution,input,templates,profile,[]{return cv::Mat{};},
+            [](const cv::Mat &,QRect,double){return QVector<TextLine>{};});
+        c.streamedCapture=true;
+        c.observeDesktopImage({{"executable","Client-Win64-Shipping.exe"}});
+        QVERIFY(c.localDesktopGame);QVERIFY(!c.streamedImage());
+        c.observeDesktopImage({{"executable","OKWW-DualPC-Native-Dev.exe"},{"own_window",true}});
+        QVERIFY(c.localDesktopGame); // Settings must not change the established source.
+        c.observeDesktopImage({{"exe","C:/Remote/Moonlight.exe"}});
+        QVERIFY(!c.localDesktopGame);QVERIFY(c.streamedImage());
+        c.desktopRecognitionMode="local";
+        c.observeDesktopImage({{"executable","GameViewer.exe"}});
+        QVERIFY(c.localDesktopGame);QVERIFY(!c.streamedImage());
+        c.desktopRecognitionMode="remote";
+        c.observeDesktopImage({{"executable","Client-Win64-Shipping.exe"}});
+        QVERIFY(!c.localDesktopGame);QVERIFY(c.streamedImage());
+        profile.set("Cloud Game","Enabled",true);c.localDesktopGame=true;
+        QVERIFY(c.streamedImage()); // An explicit cloud profile still takes precedence.
+    }
     void lilyReleasesHeavyOnTimeoutAndCancellation() {
         for (bool cancel : {false, true}) {
             test::RotationReplay host({{"forte", true}, {"con", 1.}, {"ready", QJsonArray{false,false,false}},

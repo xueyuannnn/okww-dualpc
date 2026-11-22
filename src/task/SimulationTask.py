@@ -51,10 +51,7 @@ class SimulationTask(DomainTask):
             index = 1
         else:  # selection == 'Shell Credit'
             index = 2
-        # go buttom
-        self.click(0.9730, 0.8806, after_sleep=1)
-        # click target
-        self.click(0.898, 0.533 + index * 0.14, after_sleep=1)
+        self.click_on_book_target(3 - index, 3, from_end=True)
         self.click_relative(0.93, 0.90, after_sleep=1)
         self.click_team_challenge()
         self.wait_in_team_and_world(time_out=self.teleport_timeout)

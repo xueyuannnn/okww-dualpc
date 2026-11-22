@@ -118,7 +118,11 @@ impl Host {
         }
         self.action(Op::Sleep, &[0.5])
     }
-    fn ensure_main(&self, timeout: f64, back: bool) -> Result {
+    fn ensure_main(&self, timeout: f64, back: bool, allow_book: bool) -> Result {
+        if allow_book && self.flag(Op::BookVisible, &[])? {
+            self.action(Op::SetLoggedIn, &[1.])?;
+            return Ok(());
+        }
         self.retry(1., || {
             let duration = if self.flag(Op::LoggedIn, &[])? {
                 timeout
@@ -182,7 +186,7 @@ impl Host {
                     }
                 }
             }
-            self.ensure_main(30., true)?;
+            self.ensure_main(30., true, false)?;
             if self.flag(Op::InTeam, &[])? {
                 self.action(Op::Key, &[5., 4.])?;
             }
@@ -275,6 +279,10 @@ impl Host {
             6 => 0.86,
             _ => return self.fail(8.),
         };
+        self.action(Op::Refresh, &[])?;
+        if self.flag(Op::FindBookCategory, &[])? {
+            return self.action(Op::ClickFound, &[after]);
+        }
         self.action(Op::Sleep, &[0.4])?;
         if kind == 6 {
             self.action(Op::ClickRelative, &[0.356, 0.882, after])?;
@@ -332,7 +340,7 @@ impl Host {
         self.action(Op::Sleep, &[2.])
     }
     fn heal(&self) -> Result {
-        self.ensure_main(120., true)?;
+        self.ensure_main(120., true, false)?;
         self.action(Op::DefaultBookName, &[])?;
         self.open_book(false)?;
         self.action(Op::CrownlessName, &[self.scalar(Op::LanguageKind, &[])?])?;
@@ -417,43 +425,161 @@ impl Host {
         // std::min keeps the first operand when the second is unordered.
         Ok(if value < 0.8806 { value } else { 0.8806 })
     }
-    fn select_entry(&self, serial: f64, total: f64) -> Result<bool> {
-        self.action(Op::Sleep, &[0.5])?;
-        let top = self.scalar(Op::BookScrollTop, &[])?;
-        let scroll = self.book_scroll(serial, total, top)?;
-        let mut target = if serial <= 4. { serial - 1. } else { -1. };
-        if target < 0. {
-            self.action(Op::ClickRelative, &[0.973, scroll, 1.])?;
+    fn book_page_same(&self, count: usize) -> Result<bool> {
+        for i in 0..count {
+            let evidence = self.call(Op::CompareBookRows, &[i as f64, i as f64])?;
+            if evidence[0] < 0.86 || evidence[1].abs() > 0.008 {
+                return Ok(false);
+            }
         }
-        let mut count = self.scalar(Op::ReadProceedRows, &[])?;
-        if target < 0.
-            && count != 0.
-            && (count == 3. || count == 4.)
-            && self.scalar(Op::StructureCount, &[])? > 0.
-            && self.flag(Op::LastRowAbove, &[0.73])?
+        Ok(count > 0)
+    }
+    fn book_page_overlap(&self, previous: usize, current: usize) -> Result<Option<usize>> {
+        let mut best = None;
+        let mut best_score = 0.;
+        for offset in 0..previous {
+            let overlap = (previous - offset).min(current);
+            if overlap < 2 {
+                continue;
+            }
+            let mut matched = 0;
+            let mut score = 0.;
+            let mut invalid = false;
+            for i in 0..overlap {
+                let evidence = self.call(Op::CompareBookRows, &[(offset + i) as f64, i as f64])?;
+                let value = evidence[0];
+                if value >= 0.82 && evidence[1] >= -0.008 {
+                    matched += 1;
+                    score += value;
+                } else if i != 0 {
+                    invalid = true;
+                }
+            }
+            // The first row can be clipped by the viewport edge. Two intact rows
+            // still establish the same ordered suffix and its absolute position.
+            let quality = matched as f64 + score / overlap as f64;
+            if !invalid && matched >= 2 && quality > best_score {
+                best = Some(offset);
+                best_score = quality;
+            }
+        }
+        Ok(best)
+    }
+    fn locate_book_entry(&self, serial: f64, total: f64, from_end: bool) -> Result<usize> {
+        if !serial.is_finite()
+            || serial.fract() != 0.
+            || !total.is_finite()
+            || total.fract() != 0.
+            || serial < 1.
+            || serial > total
+            || total > 1000.
         {
-            let item_height =
-                (0.8806 - top - (self.scalar(Op::StructureCount, &[])? - 1.) * 0.028) / total;
+            self.fail(15.)?;
+            return Err(HOST_ERROR);
+        }
+        let mut count = 0_usize;
+        let mut top_ready = false;
+        for reset in 0..3 {
             self.action(
-                Op::ClickRelative,
-                &[0.973, (scroll + item_height * 0.55).min(0.8806), 1.],
+                Op::Scroll,
+                &[if from_end { -100. } else { 100. }, 0.68, 0.55],
             )?;
-            count = self.scalar(Op::ReadProceedRows, &[])?;
+            self.action(Op::Sleep, &[0.45])?;
+            count = self.scalar(Op::ReadProceedRows, &[])? as usize;
+            self.action(Op::StoreBookRows, &[])?;
+            self.action(Op::Sleep, &[0.2])?;
+            let observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
+            if observed == count
+                && count > 0
+                && self.book_page_same(count)?
+                && (if from_end {
+                    reset >= 1
+                } else {
+                    self.flag(Op::BookAtTop, &[total])? || reset >= 1
+                })
+            {
+                top_ready = true;
+                break;
+            }
         }
-        if count == 0. {
-            self.fail(18.)?;
+        if !top_ready {
+            self.action(Op::BookSelectionFailure, &[serial, total, 0.])?;
         }
-        if target >= count {
-            self.action(Op::ClickRelative, &[0.973, scroll, 1.])?;
-            count = self.scalar(Op::ReadProceedRows, &[])?;
-            target = -1.;
+        let mut first = 1_usize;
+        let mut stalled = 0;
+        let mut target = None;
+        for _ in 0..(total as usize * 6 + 24) {
+            self.action(Op::Checkpoint, &[])?;
+            let requested = if from_end {
+                count.saturating_sub(serial as usize) + 1
+            } else {
+                serial as usize
+            };
+            if from_end && count < (serial as usize) {
+                break;
+            }
+            if requested >= first && requested < first + count {
+                let index = requested - first;
+                self.action(Op::StoreBookRows, &[])?;
+                self.action(Op::Sleep, &[0.2])?;
+                let observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
+                if observed == count && self.book_page_same(count)? {
+                    target = Some(index);
+                    break;
+                }
+                count = observed;
+                stalled += 1;
+                if stalled >= 4 {
+                    break;
+                }
+                continue;
+            }
+            self.action(Op::StoreBookRows, &[])?;
+            self.action(Op::Scroll, &[-2., 0.68, 0.55])?;
+            self.action(Op::Sleep, &[0.45])?;
+            let observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
+            if let Some(offset) = self.book_page_overlap(count, observed)? {
+                if offset == 0 {
+                    stalled += 1;
+                } else {
+                    stalled = 0;
+                }
+                first += offset;
+                count = observed;
+            } else {
+                // Return toward the last verified page; never assign a guessed ordinal.
+                self.action(Op::Scroll, &[1., 0.68, 0.55])?;
+                self.action(Op::Sleep, &[0.35])?;
+                let recovered = self.scalar(Op::ReadProceedRows, &[])? as usize;
+                if let Some(offset) = self.book_page_overlap(count, recovered)? {
+                    first += offset;
+                    count = recovered;
+                } else {
+                    self.action(Op::BookSelectionFailure, &[serial, total, 2.])?;
+                    return Err(HOST_ERROR);
+                }
+                stalled += 1;
+            }
+            if stalled >= 5 {
+                break;
+            }
         }
-        if count == 0. {
-            self.fail(19.)?;
-        }
+        let Some(index) = target else {
+            self.action(Op::BookSelectionFailure, &[serial, total, 1.])?;
+            return Err(HOST_ERROR);
+        };
+        Ok(index)
+    }
+    fn select_entry(&self, serial: f64, total: f64, from_end: bool) -> Result<bool> {
+        let selected = Cell::new(0);
+        self.retry(2., || {
+            selected.set(self.locate_book_entry(serial, total, from_end)?);
+            Ok(())
+        })?;
+        let index = selected.get();
         self.action(
             Op::ClickProceedRow,
-            &[if target < 0. { count - 1. } else { target }, 1.],
+            &[index as f64, 0.6, if from_end { -serial } else { serial }],
         )?;
         let confirmed = Cell::new(false);
         if !self.observe(
@@ -498,7 +624,9 @@ impl Host {
             Method::WaitTeam => value = self.wait_team(a[0], a[1] != 0., a[2] != 0.)? as u8 as f64,
             Method::Confirm => self.confirm(a[0] != 0.)?,
             Method::ExitRealm => self.exit_realm(a[0])?,
-            Method::EnsureMain => self.ensure_main(a[0], a[1] != 0.)?,
+            Method::EnsureMain => {
+                self.ensure_main(a[0], a[1] != 0., a.get(2).is_some_and(|v| *v != 0.))?
+            }
             Method::OpenBook => self.open_book(a.first().is_some_and(|v| *v != 0.))?,
             Method::SelectMonster => self.select_monster(a[0])?,
             Method::Category => self.category(a[0])?,
@@ -507,7 +635,10 @@ impl Host {
             Method::Heal => self.heal()?,
             Method::Travel => self.wait_travel()?,
             Method::StartChallenge => self.start_challenge()?,
-            Method::SelectEntry => value = self.select_entry(a[0], a[1])? as u8 as f64,
+            Method::SelectEntry => {
+                value =
+                    self.select_entry(a[0], a[1], a.get(2).is_some_and(|v| *v != 0.))? as u8 as f64
+            }
             _ => return Err(INVALID_ACTION),
         }
         Ok([value, 0., 0.])

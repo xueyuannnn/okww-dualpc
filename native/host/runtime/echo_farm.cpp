@@ -454,6 +454,10 @@ double EchoFarm::rustTravel(int method) {
             walkResult_.clear();
             break;
         }
+        case rust::WorkflowOp::NavPrepareBook: {
+            navigation_.ensureMain(a[0],true,true);
+            break;
+        }
         case rust::WorkflowOp::NavEnsureMain: {
             navigation_.ensureMain(a[0]);
             break;
@@ -681,7 +685,7 @@ double EchoFarm::rustTravel(int method) {
             break;
         }
         case rust::WorkflowOp::EnsureEchoMainDefault: {
-            navigation_.ensureMain();
+            navigation_.ensureMain(30,true,true);
             break;
         }
         case rust::WorkflowOp::ReadEchoWeeklyCountLines: {

@@ -259,6 +259,10 @@ std::array<double, 3> NightmareFarm::rustRun(int method, std::initializer_list<d
                 out[0] = world_.findEcho(false, true, a[0]).first;
                 break;
             }
+            case rust::WorkflowOp::NavPrepareBook: {
+                navigation_.ensureMain(a[0],true,true);
+                break;
+            }
             case rust::WorkflowOp::NavEnsureMain: {
                 navigation_.ensureMain(a[0]);
                 break;

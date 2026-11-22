@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
          {"hud-probe", "Measure saved party marker matching without issuing input"},
          {"cloud", "Use browser-cloud visual rules for offline combat analysis"},
          {"streamed", "Use compressed desktop visual rules for offline combat analysis"},
+         {"local-game", "Use native local desktop game recognition (saved images only)"},
          {"garden", "Analyze saved weekly overview without issuing input"},
          {"daily", "Analyze saved daily overview without issuing input"},
          {"stamina", "Analyze saved resource counters without issuing input"}});
@@ -181,7 +182,10 @@ int main(int argc, char **argv) {
                     },execution);
                 TaskContext context(execution,input,templates,profile,[&] { return image; },
                     [&](const auto &frame,auto area,double threshold) { return ocr->read(frame,area,threshold); });
-                context.streamedCapture = parser.isSet("streamed");
+                context.streamedCapture = parser.isSet("streamed") || parser.isSet("local-game");
+                if(parser.isSet("local-game")) {
+                    context.desktopRecognitionMode="local";context.observeDesktopImage({});
+                }
                 context.refresh();
                 if (parser.isSet("daily")) {
                     QJsonObject observation;
@@ -253,7 +257,10 @@ int main(int argc, char **argv) {
                     });
                 context.refresh();
                 CombatVision vision(context, root + "/native/resources/characters.json");
-                context.streamedCapture = parser.isSet("streamed");
+                context.streamedCapture = parser.isSet("streamed") || parser.isSet("local-game");
+                if(parser.isSet("local-game")) {
+                    context.desktopRecognitionMode="local";context.observeDesktopImage({});
+                }
                 auto hud = vision.party();
                 QJsonArray chars;
                 Concerto concerto;

@@ -37,3 +37,24 @@ def test_cloud_lock_uses_gold_pixels_instead_of_the_template_name(name, expected
         box_of_screen=lambda *args: None, get_target_names=lambda: ('has_target_cloud','no_target_cloud'),
         frame=image, find_best_match_in_box=Mock(return_value=Box(0,0,image.shape[1],image.shape[0],name='no_target_cloud')))
     assert bool(CombatCheck.has_target(task)) is expected
+
+
+@pytest.mark.parametrize('local', [False, True])
+@pytest.mark.parametrize('distinct', [False, True])
+def test_desktop_ring_safety_also_applies_to_local_game(monkeypatch, local, distinct):
+    import dualpc.combat
+
+    ring = Mock(return_value=distinct)
+    monkeypatch.setattr(dualpc.combat, 'desktop_target_ring_evidence', ring)
+    task = SimpleNamespace(
+        _native_vision={'desktop': True, 'local_game': local, 'streamed': not local},
+        get_target_names=lambda: ('has_target', 'no_target'),
+        is_browser=lambda: False, is_cloud_game=lambda: False,
+        get_box_by_name=lambda name: SimpleNamespace(scale=lambda *args: None),
+        find_best_match_in_box=Mock(return_value=SimpleNamespace(name='has_target', confidence=.9,
+            crop_frame=lambda frame: object())),
+        get_feature_by_name=lambda name: SimpleNamespace(mat=object()),frame=object(),
+        esc_count=0,
+    )
+    assert bool(CombatCheck.has_target(task)) is distinct
+    ring.assert_called_once()

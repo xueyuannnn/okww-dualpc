@@ -284,7 +284,7 @@ class FarmEchoTask(WWOneTimeTask, BaseCombatTask):
 
     def teleport_to_configured_boss(self):
         teleport_to_boss = farm_setting(self, 'Teleport to Boss', 'No')
-        self.ensure_main(time_out=180)
+        self.ensure_main(time_out=180, allow_book=True)
         structure = None
         if teleport_to_boss == 'Weekly Challenge':
             feature = 'zhange'
@@ -562,7 +562,7 @@ class FarmEchoTask(WWOneTimeTask, BaseCombatTask):
     def teleport_to_nearest_boss(self):
         if self.aim_boss is not None:
             self.log_info(f'teleport_to_nearest_boss {self.aim_boss}')
-            self.ensure_main(time_out=180)
+            self.ensure_main(time_out=180, allow_book=True)
             self.openF2Book("gray_book_all_monsters")
             self.click(0.13, 0.14, after_sleep=0.5)
             self.input_text(self.aim_boss)

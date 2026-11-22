@@ -16,7 +16,7 @@ class TacetTask2(TacetTask):
     def farm_tacet(self, config=None):
         if config is None:
             config = self.config
-        self.ensure_main()
+        self.ensure_main(allow_book=True)
         try:
             hijack_use_stamina(self) # 劫持
             count = revise_count(task_class=self, input_count=config.get('Tacet Suppression Count'))

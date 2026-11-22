@@ -5,7 +5,7 @@ impl Host {
     }
     fn echo_teleport(&self) -> Result {
         self.action(Op::ClearEchoWalkResult, &[])?;
-        self.action(Op::NavEnsureMain, &[180.])?;
+        self.action(Op::NavPrepareBook, &[180.])?;
         let category = self.scalar(Op::EchoTeleportCategory, &[])? as i32;
         let (feature, serial, total, special) = match category {
             0 => (0., self.scalar(Op::EchoWeeklySerial, &[])?, 9., false),
@@ -70,7 +70,7 @@ impl Host {
     }
     fn echo_nearest(&self) -> Result {
         if !self.flag(Op::EchoAimBossEmpty, &[])? {
-            self.action(Op::NavEnsureMain, &[180.])?;
+            self.action(Op::NavPrepareBook, &[180.])?;
             self.action(Op::OpenEchoDefaultBook, &[])?;
             self.action(Op::SelectEchoAimMonster, &[])?;
             self.action(Op::ClickRelative, &[0.89, 0.92, 1.])?;

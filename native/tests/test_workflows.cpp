@@ -119,8 +119,9 @@ class WorkflowTests : public QObject {
     Q_OBJECT
   private slots:
     void goldenRemoteBackgroundNeverStartsOrSustainsCombat() {
-        for(const QSize size:{QSize(1280,720),QSize(1920,1080),QSize(2560,1440)}) {
+        for(bool local:{false,true})for(const QSize size:{QSize(1280,720),QSize(1920,1080),QSize(2560,1440)}) {
             Scenes s(size);s.c.streamedCapture=true;s.c.task="AutoCombatTask";
+            s.c.localDesktopGame=local;
             const auto box=s.templates.box("has_target",size);
             auto patch=readImage(s.root+"/tests/fixtures/remote-target/golden-unlocked.png");
             cv::resize(patch,patch,{box.width(),box.height()});
@@ -192,6 +193,34 @@ class WorkflowTests : public QObject {
             cv::rectangle(world,cv::Rect(size.width()/3,size.height()/3,size.width()/12,
                 std::max(3,size.height()/180)),cv::Scalar(65,70,200),cv::FILLED);
             s.show("world"); QVERIFY(vision.healthBar(true));
+        }
+    }
+    void localDesktopBgraFramesRecognizeEachMemberAndStopAtTheEndOfCombat() {
+        for(const auto backend:QStringList{"DXGI","WIN32"})for(const QSize size:
+            {QSize(1280,720),QSize(1920,1080),QSize(2560,1440)}) {
+            Scenes s(size);s.c.streamedCapture=true;s.c.task="AutoCombatTask";
+            s.c.observeDesktopImage({{"executable","Client-Win64-Shipping.exe"}});
+            QVERIFY(!s.c.streamedImage());
+            for(int current=0;current<3;++current) {
+                QStringList markers{"has_target","world_earth_icon"};
+                for(int i=0;i<3;++i)if(i!=current)markers<<QString("char_%1_text").arg(i+1);
+                const auto name=backend+QString::number(current);s.frame(name,markers);
+                cv::Mat bgra;cv::cvtColor(s.frames[name],bgra,cv::COLOR_BGR2BGRA);
+                Frame f;f.width=bgra.cols;f.height=bgra.rows;f.stride=int(bgra.step[0]);
+                f.format=PixelFormat::BGRA32;
+                f.bytes=QByteArray(reinterpret_cast<const char *>(bgra.data),f.stride*f.height);
+                auto config=s.config;config.set("capture.source","desktop");config.set("capture.local_backend",backend);
+                s.frames[name]=inferenceImage(f,config);
+                s.show(name);
+                const auto hud=s.c.party();QVERIFY(hud.visible);QCOMPARE(hud.current,current);QCOMPARE(hud.size,3);
+                CombatVision vision(s.c,s.root+"/native/resources/characters.json");
+                QVERIFY(vision.hasTarget());
+                CombatSession combat(s.c,s.root,s.directory.path());combat.targetEnemyTimeout=.2;
+                QVERIFY(combat.active());s.c.refresh();QVERIFY(combat.active());
+                s.clock.time+=1.1;s.show("world");
+                QVERIFY(!vision.hasTarget());QVERIFY(!vision.healthBar(true));
+                QVERIFY(!combat.active());QVERIFY(s.input.idle());
+            }
         }
     }
     void remoteCompletionOverridesALingeringTarget() {
@@ -1163,7 +1192,7 @@ class WorkflowTests : public QObject {
         };
         s.show("world");
         Garden(s.c, s.root).run();
-        QCOMPARE(opens, 2);
+        QCOMPARE(opens, 1); // Retrying the weekly tab reuses the already open guide.
         QCOMPARE(tabs, 2);
         QCOMPARE(claims, 2);
         QVERIFY(s.input.idle());

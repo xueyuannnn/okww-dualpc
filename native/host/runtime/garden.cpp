@@ -789,6 +789,10 @@ void Garden::run() {
                 runLoop();
                 break;
             }
+            case rust::WorkflowOp::NavPrepareBook: {
+                navigation_.ensureMain(a[0],true,true);
+                break;
+            }
             case rust::WorkflowOp::NavEnsureMain: {
                 navigation_.ensureMain(a[0]);
                 break;

@@ -310,7 +310,7 @@ impl Host {
         if self.flag(Op::IsGardenActive, &[])? {
             self.action(Op::RunGardenLoopWithRetries, &[])?;
         }
-        self.action(Op::NavEnsureMain, &[30.])?;
+        self.action(Op::NavPrepareBook, &[30.])?;
         for _round in 0..50 {
             self.action(Op::OpenGardenWeekly, &[])?;
             self.wait_for(|| self.flag(Op::ReadGardenWeeklyProgress, &[]), 5.)?;

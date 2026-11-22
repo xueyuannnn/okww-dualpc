@@ -9,6 +9,43 @@ using namespace okww;
 class NativeTests : public QObject {
     Q_OBJECT
   private slots:
+    void resumedTaskHeartbeatRecoversWithoutReplayingReleasedKeys() {
+        Backend backend(false);backend.start(Config::defaults(),true);backend.arm(true);
+        backend.nativeCommand({{"op","key"},{"code",4},{"down",true}});
+        backend.nativeCommand({{"op","button"},{"name","left"},{"down",true}});
+        BackendCaptureFixture::heartbeatStall(backend);
+        QVERIFY(!backend.heartbeat());
+        QVERIFY(backend.snapshot()["box"].toObject()["keys"].toArray().isEmpty());
+        QVERIFY(backend.tryRecoverTaskHeartbeat());
+        const auto state=backend.snapshot();
+        QVERIFY(state["armed"].toBool());QVERIFY(state["error"].toString().isEmpty());
+        QVERIFY(state["input_fault"].toObject().isEmpty());
+        QCOMPARE(state["box"].toObject()["buttons"].toInt(),0);
+        QVERIFY(state["box"].toObject()["keys"].toArray().isEmpty());
+        QVERIFY(state["heartbeat_recovery"].toObject()["heartbeat_gap_ms"].toDouble()>=3310);
+        backend.arm(false);
+    }
+    void explicitStopExpiredHeartbeatAndRepeatedStallsDoNotRearm() {
+        Backend backend(false);backend.start(Config::defaults(),true);backend.arm(true);
+        BackendCaptureFixture::heartbeatStall(backend);backend.arm(false);
+        QVERIFY(!backend.tryRecoverTaskHeartbeat());
+        backend.arm(true);BackendCaptureFixture::heartbeatStall(backend);
+        BackendCaptureFixture::expireHeartbeatRecovery(backend);
+        QVERIFY(!backend.tryRecoverTaskHeartbeat());
+        backend.arm(true);
+        for(int i=0;i<3;++i){BackendCaptureFixture::heartbeatStall(backend);QVERIFY(backend.tryRecoverTaskHeartbeat());}
+        BackendCaptureFixture::heartbeatStall(backend);
+        QVERIFY(!backend.tryRecoverTaskHeartbeat());QVERIFY(!backend.snapshot()["armed"].toBool());
+        backend.stop();QVERIFY(!backend.tryRecoverTaskHeartbeat());
+    }
+    void heartbeatRecoveryRequiresAFreshCaptureFrame() {
+        BackendCaptureFixture fixture;auto &backend=fixture.backend;
+        backend.arm(true);BackendCaptureFixture::heartbeatStall(backend);
+        fixture.publish(200);
+        QVERIFY(!backend.tryRecoverTaskHeartbeat());QVERIFY(!backend.snapshot()["armed"].toBool());
+        fixture.publish();QVERIFY(backend.tryRecoverTaskHeartbeat());
+        QVERIFY(backend.snapshot()["armed"].toBool());backend.arm(false);
+    }
     void inputDiagnosticsDoNotWaitForTheUiWindow() {
         const auto window = CreateWindowExW(0, L"STATIC", L"diagnostic caption", 0,
                                              0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);

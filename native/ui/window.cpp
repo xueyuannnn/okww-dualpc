@@ -667,6 +667,18 @@ QWidget *Window::devicePage() {
     localCaptureLayout->addRow(localCaptureHint);
     captureForms_->addWidget(localCapture);
     captureLayout->addWidget(captureForms_);
+    auto recognitionRow=new QWidget;
+    auto recognitionForm=new QFormLayout(recognitionRow);
+    recognitionForm->setContentsMargins(0,0,0,0);
+    recognitionMode_=new classic::ComboBox;
+    recognitionMode_->setObjectName("desktopRecognitionMode");
+    recognitionMode_->addItem("自动 · 区分本机游戏与远程软件","auto");
+    recognitionMode_->addItem("本机游戏 · 清晰画面","local");
+    recognitionMode_->addItem("远程画面 · 压缩容错","remote");
+    recognitionMode_->setCurrentIndex(std::max(0,recognitionMode_->findData(deviceDraftConfig_.s("capture.recognition_mode"))));
+    recognitionMode_->setToolTip("自动根据游戏或远程软件进程区分画面类型；未识别的软件可手动选择。修改后下次启动任务生效，不改变采集范围。游戏画面应完整显示为 16:9。");
+    recognitionForm->addRow("画面类型",recognitionMode_);
+    captureLayout->addWidget(recognitionRow);
     auto overlayHint = new QLabel("建议关闭 NVIDIA 帧率统计及其他性能悬浮层，避免遮挡体力、队伍和技能信息，影响识别。");
     overlayHint->setObjectName("captureOverlayHint");
     overlayHint->setWordWrap(true);
@@ -910,10 +922,11 @@ QWidget *Window::devicePage() {
     connect(protocol_, &QComboBox::currentIndexChanged, this, updateInputForm);
     connect(expand,&QPushButton::toggled,this,updateInputForm);
     updateInputForm();
-    const auto updateCaptureForm = [this,caf,manual,dxgiTargetSettings,win32TargetSettings,remoteFullscreenHint] {
+    const auto updateCaptureForm = [this,caf,manual,dxgiTargetSettings,win32TargetSettings,remoteFullscreenHint,recognitionRow] {
         const bool cardMode = captureSource_->currentData().toString() == "card";
         captureForms_->setCurrentIndex(cardMode ? 0 : captureSource_->currentData().toString()=="DXGI" ? 1 : 2);
         remoteFullscreenHint->setVisible(!cardMode);
+        recognitionRow->setVisible(!cardMode);
         caf->setRowVisible(backendChoice_,cardMode);
         caf->setRowVisible(manualCapture_,cardMode);
         caf->setRowVisible(manual,cardMode && manualCapture_->isChecked());
@@ -949,7 +962,7 @@ QWidget *Window::devicePage() {
     connect(captureSource_, &QComboBox::currentIndexChanged, this, [this] {
         if (captureSource_->currentData().toString() != "card") scanDesktopTargets();
     });
-    for (auto choice : {backendChoice_, deviceChoice_, resolution_, format_, fps_, protocol_, inferenceResolution_, captureSource_, localCaptureTarget_, dxgiMonitor_, localInputTarget_})
+    for (auto choice : {backendChoice_, deviceChoice_, resolution_, format_, fps_, protocol_, inferenceResolution_, captureSource_, localCaptureTarget_, dxgiMonitor_, localInputTarget_,recognitionMode_})
         connect(choice, &QComboBox::currentIndexChanged, this, &Window::queueDeviceSave);
     connect(localCaptureFps_, &QComboBox::currentTextChanged, this, [this](const QString &text) {
         // Share the manual limit while retaining DXGI's independent automatic option.
@@ -1233,6 +1246,9 @@ void Window::filterModes() {
 }
 Config Window::deviceConfiguration(bool requireSelection) const {
     auto current = deviceDraftConfig_;
+    const auto recognition=recognitionMode_->currentData().toString();
+    if(recognition!="auto" || !current.get("capture.recognition_mode").isUndefined())
+        current.set("capture.recognition_mode",recognition);
     current.set("kmbox.dry_run", false);
     const bool local = captureSource_->currentData().toString() != "card";
     current.set("capture.source",local ? "desktop" : "card");
@@ -1782,6 +1798,8 @@ void Window::handleEngineMessage(const QJsonObject &o) {
         setCatalog(o["data"].toObject());
     } else if (event == "log") {
         log(o["text"].toString());
+    } else if (event == "input_recovered") {
+        if(executionError_.isEmpty())banner_->hide();
     } else if (event == "task_done") {
         log("任务执行完毕：" + o["task"].toString());
         if (taskProgress_["task"] != o["task"]) taskProgress_ = {};

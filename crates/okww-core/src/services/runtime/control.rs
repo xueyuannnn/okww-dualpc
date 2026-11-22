@@ -36,6 +36,26 @@ impl Host {
                 self.action(Op::BackendControlHeartbeatNow, &[])?;
                 return Ok([1., 0., 0.]);
             }
+            Method::BackendResumeTaskHeartbeat => {
+                if !self.flag(Op::HeartbeatRecoveryAllowed, &[])?
+                    || self.flag(Op::BackendControlArmed, &[])?
+                    || self.scalar(Op::HeartbeatRecoveryAgeMs, &[])? > 10000.
+                    || self.flag(Op::HeartbeatRecoveryLimited, &[])?
+                    || !self.flag(Op::BackendControlHasBox, &[])?
+                    || !self.flag(Op::BackendControlBoxConnected, &[])?
+                    || !self.flag(Op::BackendControlBoxKeyboard, &[])?
+                {
+                    return Ok([0.; 3]);
+                }
+                self.action(Op::BackendControlReadFrame, &[])?;
+                let fresh = self.flag(Op::BackendControlFramePresent, &[])?;
+                self.action(Op::BackendControlDropFrame, &[])?;
+                if !fresh {
+                    return Ok([0.; 3]);
+                }
+                self.action(Op::CommitHeartbeatRecovery, &[])?;
+                return Ok([1., 0., 0.]);
+            }
             Method::BackendTestMove => {
                 if !self.flag(Op::BackendControlHasBox, &[])?
                     || !self.flag(Op::BackendControlBoxConnected, &[])?
