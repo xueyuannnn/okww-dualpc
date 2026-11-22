@@ -34,6 +34,10 @@ impl Host {
         {
             return Ok(target[0] != 0.);
         }
+        if self.flag(Op::DesktopCapture, &[])? || self.flag(Op::StreamedImage, &[])? {
+            // A displaced HUD in a remote frame is not an escape-menu request.
+            return Ok(true);
+        }
         self.guarded(Bool::Checking, true, || {
             self.action(Op::Sleep, &[1.])?;
             let target = self.values(Op::ObserveTarget, &[short as u8 as f64])?;

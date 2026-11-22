@@ -494,6 +494,9 @@ bool CombatSession::rustAccess(rust::SessionOp op, const double *a, double *out,
     case O::StreamedImage:
         out[0] = context_.streamedImage();
         return true;
+    case O::DesktopCapture:
+        out[0] = context_.streamedCapture;
+        return true;
     case O::LastHealthSeen:
         out[0] = lastHealthSeen_;
         return true;

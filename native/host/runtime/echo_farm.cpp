@@ -828,6 +828,9 @@ double EchoFarm::rustTravel(int method) {
             out[0] = justEntered_;
             break;
         }
+        case rust::WorkflowOp::DesktopCapture:
+            out[0] = c_.streamedCapture;
+            break;
         case rust::WorkflowOp::RestartEchoDomain: {
             restartBossDomain(c_);
             break;

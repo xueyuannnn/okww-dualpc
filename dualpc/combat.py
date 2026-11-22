@@ -11,6 +11,57 @@ logger = Logger.get_logger(__name__)
 LEVEL_TEXT = re.compile(r"(?<![A-Za-z])Lv[\s.·]*\d{1,3}(?!\d)", re.IGNORECASE)
 
 
+def desktop_target_ring_evidence(image, reference):
+    if (image is None or reference is None or image.size == 0 or reference.size == 0
+            or image.shape != reference.shape or image.ndim != 3 or image.shape[2] != 3):
+        return False
+    expected = cv2.cvtColor(reference, cv2.COLOR_BGR2HSV)
+    observed = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    ring = cv2.inRange(expected, (12, 65, 55), (45, 255, 255))
+    gold = cv2.inRange(observed, (10, 35, 55), (48, 255, 255))
+    near = cv2.dilate(ring, np.ones((3, 3), np.uint8))
+    far = cv2.dilate(ring, np.ones((5, 5), np.uint8))
+    neutral = cv2.inRange(expected, (0, 0, 0), (179, 120, 200))
+    control = far & cv2.bitwise_not(near) & neutral
+    corners = np.zeros_like(ring)
+    height, width = ring.shape
+    w, h = max(1, round(width * .2)), max(1, round(height * .2))
+    corners[:h, :w] = corners[:h, -w:] = corners[-h:, :w] = corners[-h:, -w:] = 255
+    corners &= neutral
+    ring_pixels, control_pixels = cv2.countNonZero(ring), cv2.countNonZero(control)
+    if min(ring_pixels, control_pixels) < 4:
+        return False
+    fraction = cv2.countNonZero(gold & ring) / ring_pixels
+    corner_pixels = cv2.countNonZero(corners)
+    background = max(cv2.countNonZero(gold & control) / control_pixels,
+                     cv2.countNonZero(gold & corners) / corner_pixels if corner_pixels >= 4 else 0)
+    return fraction >= .35 and fraction - background >= .15
+
+
+def desktop_health_bar(frame, relaxed=True):
+    """Enemy regions exclude player HUD and remote-client edge overlays."""
+    if frame is None or frame.size == 0:
+        return False
+    height, width = frame.shape[:2]
+    for bounds, color, ratio, max_width, fill in (
+            ((.08, .10, .86, .84), ((55, 55, 174), (76, 85, 225)), 4, width * .28, .6 if relaxed else .95),
+            ((1269 / 3840, 58 / 2160, 2533 / 3840, 200 / 2160),
+             ((4, 30, 245), (75, 185, 255)), 6, width, .85 if relaxed else .95)):
+        left, top, right, bottom = bounds
+        x, y = round(left * width), round(top * height)
+        crop = frame[y:round(bottom * height), x:round(right * width)]
+        mask = cv2.inRange(crop, color[0], color[1])
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            bx, by, w, h = cv2.boundingRect(contour)
+            if (max(12, width * 40 / 3840) <= w <= max_width
+                    and max(2, height * 9 / 2160) <= h <= max(6, height * 32 / 2160)
+                    and w >= h * ratio
+                    and cv2.countNonZero(mask[by:by + h, bx:bx + w]) / (w * h) >= fill):
+                return True
+    return False
+
+
 def shifted_bar_candidates(frame):
     height, width = frame.shape[:2]
     scale = height / 1080

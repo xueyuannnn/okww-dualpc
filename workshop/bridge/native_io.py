@@ -132,6 +132,7 @@ def install_native_io(channel, direct_input=False):
             self.error = ""
             self._closed = True
             self.native_party_hud = None
+            self.native_desktop_capture = False
 
         def start(self, timeout=5):
             state = channel.request("state")
@@ -149,9 +150,11 @@ def install_native_io(channel, direct_input=False):
             meta, raw = channel.frame()
             if meta is None:
                 self.native_party_hud = None
+                self.native_desktop_capture = False
                 return None
             image = decode_frame(meta, raw)
             self.native_party_hud = native_party_hud(meta)
+            self.native_desktop_capture = meta.get('desktop_capture') is True
             self.raw_size = (meta["width"], meta["height"])
             self.sequence = int(meta["sequence"])
             self.actual = dict(channel.state.get("actual", {}), frame_width=meta["width"], frame_height=meta["height"])

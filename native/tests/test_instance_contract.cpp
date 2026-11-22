@@ -20,7 +20,7 @@ struct ClockProbe final : Clock {
             tick();
     }
 };
-QJsonObject replay(int scene, bool rust) {
+QJsonObject replay(int scene, bool rust, int *introReads = nullptr) {
     const auto root = QString(OKWW_SOURCE_ROOT);
     QTemporaryDir directory;
     Templates templates(root + "/assets/coco_annotations.json");
@@ -77,7 +77,14 @@ QJsonObject replay(int scene, bool rust) {
                 return blank;
             return realm;
         },
-        [&](const cv::Mat &, QRect area, double threshold) {
+        [&](const cv::Mat &image, QRect area, double threshold) {
+            // These legacy scenes contain no combat-introduction panel. Keep
+            // its added read-only probe separate from the dialog OCR sequence
+            // and fault indices; input events remain compared in full.
+            if (scene / 32 == 2 && area == gameBox(image,.38,.16,.85,.25)) {
+                if (introReads) ++*introReads;
+                return QVector<TextLine>{};
+            }
             ++reads;
             events.append(QJsonObject{
                 {"read", reads}, {"area", rectangle(area)}, {"threshold", threshold}, {"time", clock.time}});
@@ -190,7 +197,9 @@ class InstanceContracts : public QObject {
     }
     void flow() {
         QFETCH(int, scene);
-        const auto expected = replay(scene, false), actual = replay(scene, true);
+        int introReads = 0;
+        const auto expected = replay(scene, false), actual = replay(scene, true, &introReads);
+        if (scene / 32 == 2) QVERIFY(introReads > 0);
         QVERIFY2(actual == expected,
                  qPrintable(
                      QString::fromUtf8(QJsonDocument(QJsonObject{{"expected", expected}, {"actual", actual}})

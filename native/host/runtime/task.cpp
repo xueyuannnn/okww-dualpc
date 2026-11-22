@@ -28,6 +28,15 @@ QString TaskContext::hotkey(const QString &setting, const QString &fallback) con
     return profile.value("Game Hotkey", setting, fallback).toString();
 }
 bool TaskContext::inTeam() { return party().visible; }
+bool TaskContext::canBackToWorld() {
+    if (!streamedCapture)
+        return true;
+    if (inTeam())
+        return false;
+    return findAny({"gray_book_quest", "gray_book_all_monsters", "gray_book_boss",
+        "gray_book_weekly", "esc_setting", "team_close", "btn_dialog_close", "map_my_location"},
+        {.threshold = .82, .grayscale = true, .blurSigma = .6}).has_value();
+}
 PartyHud TaskContext::party() {
     if (streamedImage() && remotePartyVersion_ == frameVersion && remotePartySize_ == frame.size())
         return remoteParty_;

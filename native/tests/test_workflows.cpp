@@ -8,6 +8,7 @@
 #include "runtime/combat_session.hpp"
 #include "runtime/diagnostics.hpp"
 #include "runtime/resource_failure.hpp"
+#include "runtime/workflow_abi.hpp"
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <QtTest>
@@ -117,6 +118,139 @@ struct Scenes {
 class WorkflowTests : public QObject {
     Q_OBJECT
   private slots:
+    void goldenRemoteBackgroundNeverStartsOrSustainsCombat() {
+        for(const QSize size:{QSize(1280,720),QSize(1920,1080),QSize(2560,1440)}) {
+            Scenes s(size);s.c.streamedCapture=true;s.c.task="AutoCombatTask";
+            const auto box=s.templates.box("has_target",size);
+            auto patch=readImage(s.root+"/tests/fixtures/remote-target/golden-unlocked.png");
+            cv::resize(patch,patch,{box.width(),box.height()});
+            patch.copyTo(s.frames["world"](cv::Rect(box.x(),box.y(),box.width(),box.height())));
+            for(int height:{size.height(),540}) {
+                cv::Mat small;
+                cv::resize(s.frames["world"],small,{height*16/9,height});
+                std::vector<uchar> encoded;cv::imencode(".jpg",small,encoded,{cv::IMWRITE_JPEG_QUALITY,45});
+                cv::resize(cv::imdecode(encoded,cv::IMREAD_COLOR),s.frames["remote"],{size.width(),size.height()});
+                s.show("remote");CombatVision vision(s.c,s.root+"/native/resources/characters.json");
+                QVERIFY(!vision.hasTarget(false,true));QVERIFY(!vision.healthBar(true));
+                CombatSession combat(s.c,s.root,s.directory.path());combat.targetEnemyTimeout=.2;
+                QVERIFY(!combat.active());QVERIFY(s.events.isEmpty());
+            }
+            s.frame("fight",{"has_target","char_2_text","char_3_text"});s.show("fight");
+            CombatSession combat(s.c,s.root,s.directory.path());combat.targetEnemyTimeout=.2;
+            QVERIFY(combat.active());s.c.refresh();QVERIFY(combat.active());
+            s.clock.time+=1.1;s.show("world");QVERIFY(!combat.active());
+            QVERIFY(!s.c.state->inCombat);QVERIFY(s.input.idle());
+        }
+    }
+    void dailyActivityAboveTheRewardThresholdRemainsComplete() {
+        for(int points:{100,140,180,240}) {
+            Scenes s;s.c.streamedCapture=true;s.frame("daily",{"gray_book_quest"});
+            s.words["daily"]={s.word("活跃度",.15,.12),s.word("活跃度",.195,.91),
+                s.word(QString::number(points),.195,.84,.06,.05)};
+            for(int i=0;i<5;++i)s.words["daily"].append(s.word(QString::number(20*(i+1)),.35+i*.133,.895,.025));
+            s.show("daily");QJsonObject observation;
+            const auto value=observeDailyProgress(s.c,&observation);
+            QCOMPARE(value.points,points);QVERIFY(value.ready());
+            QVERIFY(observation["page_confirmed"].toBool());QVERIFY(s.events.isEmpty());
+        }
+        Scenes s;s.c.streamedCapture=true;s.frame("daily",{"gray_book_quest"});
+        s.words["daily"]={s.word("活跃度",.15,.12),s.word("活跃度",.195,.91),
+            s.word("999",.195,.84,.06,.05)};s.show("daily");
+        QCOMPARE(observeDailyProgress(s.c).points,-1);
+    }
+    void resourceIconsIdentifyCountersWithoutASlashAndIgnoreTheOverlay() {
+        Scenes s;s.c.streamedCapture=true;
+        s.frame("resources",{"waveplate_counter_icon_hcenter","reserve_counter_icon_hcenter"});
+        s.words["resources"]={s.word("95",.578,.043,.025,.035),s.word("240",.72,.043,.035,.035),
+            s.word("FPS",.856,.01),s.word("999",.85,.05,.04,.025)};
+        s.show("resources");const auto value=readStamina(s.c);
+        QCOMPARE(value.current,240);QCOMPARE(value.reserve,95);QCOMPARE(value.total,335);
+        QVERIFY(s.events.isEmpty());
+        s.words["resources"].append(s.word("10",.70,.043,.02,.035));s.c.refresh();
+        QCOMPARE(readStamina(s.c).current,-1); // Two plausible numbers never consume a resource.
+        QVERIFY(s.events.isEmpty());
+    }
+    void desktopPlayerHudCannotKeepCombatAlive() {
+        for (const QSize size : {QSize(1280,720), QSize(1920,1080), QSize(2560,1440)}) {
+            Scenes s(size); s.c.streamedCapture=true; s.c.task="AutoCombatTask";
+            s.frame("fight",{"has_target","char_2_text","char_3_text"});
+            auto &world=s.frames["world"];
+            const auto draw=[&](double x,double y,double w,double h) {
+                cv::rectangle(world,cv::Rect(int(size.width()*x),int(size.height()*y),
+                    int(size.width()*w),std::max(3,int(size.height()*h))),cv::Scalar(65,70,200),cv::FILLED);
+            };
+            draw(.36,.95,.19,.006); // Player forte/HP.
+            draw(.89,.13,.05,.006); // Remote-client/performance overlay.
+            draw(.02,.06,.05,.006); // Minimap decoration.
+            s.show("fight");
+            CombatSession combat(s.c,s.root,s.directory.path()); combat.targetEnemyTimeout=.2;
+            QVERIFY(combat.active()); s.c.refresh(); QVERIFY(combat.active());
+            s.clock.time+=1.1; s.show("world");
+            CombatVision vision(s.c,s.root+"/native/resources/characters.json");
+            QVERIFY(!vision.healthBar(true));
+            QVERIFY(!combat.active()); QVERIFY(!s.c.state->inCombat); QVERIFY(s.input.idle());
+            cv::rectangle(world,cv::Rect(size.width()/3,size.height()/3,size.width()/12,
+                std::max(3,size.height()/180)),cv::Scalar(65,70,200),cv::FILLED);
+            s.show("world"); QVERIFY(vision.healthBar(true));
+        }
+    }
+    void remoteCompletionOverridesALingeringTarget() {
+        for(bool tolerance:{false,true}) {
+        Scenes s; s.c.streamedCapture=true; s.c.task="AutoCombatTask";
+        s.profile.set("Cloud Game","Compressed Image Tolerance",tolerance);
+        s.frame("fight",{"has_target","char_2_text","char_3_text"});s.show("fight");
+        CombatSession combat(s.c,s.root,s.directory.path());
+        QVERIFY(combat.active());
+        combat.combatEndCondition=[] { return true; };
+        s.c.refresh(); QVERIFY(!combat.active());
+        QVERIFY(!s.c.state->inCombat); QVERIFY(s.input.idle());
+        }
+    }
+    void displacedRemoteTargetNeverOpensTheExitMenu() {
+        for(bool tolerance:{false,true}) {
+        Scenes s; s.c.streamedCapture=true;
+        s.profile.set("Cloud Game","Compressed Image Tolerance",tolerance);
+        const auto box=s.templates.box("has_target",s.size);
+        auto pattern=s.templates.pattern("has_target",s.size);
+        if(pattern.channels()==1) cv::cvtColor(pattern,pattern,cv::COLOR_GRAY2BGR);
+        pattern.copyTo(s.frames["world"](cv::Rect(box.x(),box.y()-box.height()/3,pattern.cols,pattern.rows)));
+        s.show("world");
+        CombatVision vision(s.c,s.root+"/native/resources/characters.json");
+        const auto target=vision.targetObservation(false,true);
+        QVERIFY(target.matched && target.locked && target.extended);
+        CombatSession combat(s.c,s.root,s.directory.path());
+        QVERIFY(combat.targetLocked()); QVERIFY(s.events.isEmpty()); QCOMPARE(s.clock.time,0.);
+        }
+    }
+    void remoteLoadingWaitDoesNotPressEscape() {
+        Scenes s; s.c.streamedCapture=true; s.show("blank");
+        s.clock.tick=[&] { if(s.clock.time>=.4) s.scene="realm"; };
+        Navigation nav(s.c); QVERIFY(nav.waitTeam(3,true,true));
+        QVERIFY(s.events.isEmpty()); QVERIFY(s.clock.time>=.4);
+    }
+    void remoteRecognizedMenuCanStillBeClosed() {
+        Scenes s; s.c.streamedCapture=true; s.profile.set("Monthly Card Config","Check Monthly Card",false);
+        s.frame("book",{"gray_book_all_monsters"});s.show("book");
+        s.action=[&](const auto &event) { if(s.keyUp(event,Input::keyCode("esc")))s.scene="world"; };
+        Navigation nav(s.c); nav.ensureMain(5,true);
+        QVERIFY(s.c.inTeam());
+        QCOMPARE(std::count_if(s.events.begin(),s.events.end(),[&](const auto &e){
+            return s.keyUp(e,Input::keyCode("esc"));}),1);
+    }
+    void remoteExitRequiresTheWorldIconToReturn() {
+        Scenes s; s.c.streamedCapture=true;
+        s.frame("unknown-location",{"char_2_text","char_3_text"});s.show("unknown-location");
+        s.clock.tick=[&] {if(s.clock.time>=4.4)s.scene="world";};
+        Navigation nav(s.c);nav.exitRealm(2);
+        QVERIFY(s.clock.time>=4.4);QVERIFY(nav.inWorld());
+    }
+    void freshRemoteEchoEntryDoesNotRunExitInteractions() {
+        using O=rust::WorkflowOp;
+        rust::workflowRun(rust::WorkflowMethod::EchoInteractions,{},[](O op,const double *,double *out) {
+            if(op==O::DesktopCapture || op==O::EchoJustEntered) out[0]=1;
+            else fail("Fresh entry unexpectedly requested action "+QString::number(int(op)));
+        });
+    }
     void remotePartyRecognizesEveryActiveSlot_data() {
         QTest::addColumn<int>("active");
         for(int i=0;i<3;++i) QTest::newRow(qPrintable(QString::number(i+1)))<<i;

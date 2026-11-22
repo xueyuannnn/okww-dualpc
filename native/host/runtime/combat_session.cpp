@@ -226,6 +226,7 @@ void CombatSession::publishParty(const QString &codeState) {
                 case rust::SessionOp::InitializePartyReport: {
                     report = identity;
                     if (context_.streamedImage()) report["hud"] = context_.partyObservation;
+                    if (context_.streamedCapture) report["target_observation"] = vision_.targetEvidence();
                     break;
                 }
                 case rust::SessionOp::AppendPartyBridge: {

@@ -677,7 +677,7 @@ class BaseWWTask(BaseTask):
 
     def wait_in_team_and_world(self, time_out=10, raise_if_not_found=True, esc=False):
         success = self.wait_until(self.in_team_and_world, time_out=time_out, raise_if_not_found=raise_if_not_found,
-                                  post_action=lambda: self.back(after_sleep=2) if esc else None)
+                                  post_action=lambda: self.back(after_sleep=2) if esc and self.can_back_to_world() else None)
         if success:
             self.sleep(0.5)
         return success
@@ -733,10 +733,24 @@ class BaseWWTask(BaseTask):
             return False
         if self.handle_monthly_card():
             return False
-        if esc:
+        if esc and self.can_back_to_world():
             self.log_debug('main esc')
             self.back(after_sleep=2)
             return False
+
+    def can_back_to_world(self):
+        manager = getattr(getattr(self, 'executor', None), 'device_manager', None)
+        reader = getattr(getattr(manager, 'capture_method', None), 'reader', None)
+        _ = self.frame
+        desktop = (getattr(self, '_native_vision', {}).get('desktop', False)
+                   or getattr(reader, 'native_desktop_capture', False) is True)
+        if not desktop:
+            return True
+        if self.in_team()[0]:
+            return False
+        return any(self.find_one(name, threshold=.82, use_gray_scale=True) for name in (
+            'gray_book_quest', 'gray_book_all_monsters', 'gray_book_boss', 'gray_book_weekly',
+            'esc_setting', 'team_close', 'btn_dialog_close', 'map_my_location'))
 
     def wait_login(self):
         if not self.logged_in:

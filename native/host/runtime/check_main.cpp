@@ -1,11 +1,13 @@
 #include "ocr.hpp"
 #include "backend.hpp"
 #include "combat_vision.hpp"
+#include "combat_session.hpp"
 #include "echo_detector.hpp"
 #include "capture.hpp"
 #include "desktop.hpp"
 #include "garden.hpp"
 #include "daily.hpp"
+#include "stamina.hpp"
 #include <iostream>
 using namespace okww;
 using namespace okww::runtime;
@@ -25,11 +27,13 @@ int main(int argc, char **argv) {
          {"garden-scan", "Profile saved Garden template scan without issuing input"},
          {"echo", "Run original echo model on saved image"},
          {"combat", "Analyze saved combat HUD without issuing input"},
+         {"combat-entry", "Replay combat entry on a saved image with recorded, simulated input only"},
          {"hud-probe", "Measure saved party marker matching without issuing input"},
          {"cloud", "Use browser-cloud visual rules for offline combat analysis"},
          {"streamed", "Use compressed desktop visual rules for offline combat analysis"},
          {"garden", "Analyze saved weekly overview without issuing input"},
-         {"daily", "Analyze saved daily overview without issuing input"}});
+         {"daily", "Analyze saved daily overview without issuing input"},
+         {"stamina", "Analyze saved resource counters without issuing input"}});
     parser.process(app);
     QJsonObject report{{"runtime", "Rust"}, {"frontend", "Qt / C++"}, {"hardware_input_sent", false}};
     try {
@@ -162,8 +166,8 @@ int main(int argc, char **argv) {
                 report["ocr_ms"] = timer.elapsed();
                 report["lines"] = lines;
             }
-            if (parser.isSet("daily")) {
-                if (!ocr) fail("每日图像检查需要 --models");
+            if (parser.isSet("daily") || parser.isSet("stamina")) {
+                if (!ocr) fail("离线页面检查需要 --models");
                 Templates templates(root + "/assets/coco_annotations.json");
                 QTemporaryDir directory;
                 Profile profile(directory.path(), root + "/native/resources/catalog.json");
@@ -179,11 +183,17 @@ int main(int argc, char **argv) {
                     [&](const auto &frame,auto area,double threshold) { return ocr->read(frame,area,threshold); });
                 context.streamedCapture = parser.isSet("streamed");
                 context.refresh();
-                QJsonObject observation;
-                const auto progress=observeDailyProgress(context,&observation);
-                report["daily"]=QJsonObject{{"progress",progress.points},{"stamina",progress.stamina.value_or(-1)},
-                    {"echo_needed",progress.echoNeeded ? QJsonValue(*progress.echoNeeded) : QJsonValue()},
-                    {"observation",observation}};
+                if (parser.isSet("daily")) {
+                    QJsonObject observation;
+                    const auto progress=observeDailyProgress(context,&observation);
+                    report["daily"]=QJsonObject{{"progress",progress.points},{"stamina",progress.stamina.value_or(-1)},
+                        {"echo_needed",progress.echoNeeded ? QJsonValue(*progress.echoNeeded) : QJsonValue()},
+                        {"observation",observation}};
+                }
+                if (parser.isSet("stamina")) {
+                    const auto values=readStamina(context);
+                    report["stamina"]=QJsonObject{{"current",values.current},{"reserve",values.reserve},{"total",values.total}};
+                }
             }
             if (parser.isSet("garden")) {
                 if (!ocr) fail("周常图像检查需要 --models");
@@ -216,7 +226,7 @@ int main(int argc, char **argv) {
                 report["garden"] = QJsonObject{{"progress", points ? QJsonValue(*points) : QJsonValue()},
                                                 {"probes", probes}, {"observation", garden.weeklyObservation()}};
             }
-            if (parser.isSet("combat")) {
+            if (parser.isSet("combat") || parser.isSet("combat-entry")) {
                 if (!ocr)
                     fail("战斗图像检查需要 --models");
                 Templates templates(root + "/assets/coco_annotations.json");
@@ -226,11 +236,13 @@ int main(int argc, char **argv) {
                 SteadyClock clock;
                 ExecutionGate gate;
                 Execution execution(gate, gate.start(), clock);
+                QJsonArray simulatedInput;
                 Input input(
                     Config::defaults(), {image.cols, image.rows}, false,
-                    [](auto command) -> QJsonObject {
-                        if (command["op"] != "release")
+                    [&](auto command) -> QJsonObject {
+                        if (command["op"] != "release" && !parser.isSet("combat-entry"))
                             fail("离线图像检查禁止输入");
+                        if (command["op"] != "release") simulatedInput.append(command);
                         return {};
                     },
                     execution);
@@ -270,6 +282,7 @@ int main(int argc, char **argv) {
                 }
                 combat["characters"] = chars;
                 combat["target"] = vision.hasTarget();
+                combat["target_observation"] = vision.targetEvidence();
                 combat["health"] = vision.healthBar(false);
                 combat["health_in_combat"] = vision.healthBar(true);
                 combat["shifted_health"] = vision.shiftedHealthBar();
@@ -279,6 +292,12 @@ int main(int argc, char **argv) {
                 combat["challenge_result"] = result ? (*result ? "success" : "failure") : "none";
                 combat["mouse_forte"] = vision.forte(Forte::Mouse);
                 combat["bar_forte"] = vision.forte(Forte::Bar);
+                if (parser.isSet("combat-entry")) {
+                    context.task="AutoCombatTask";
+                    CombatSession session(context,root,directory.path());
+                    combat["would_enter_combat"]=session.active();
+                    combat["simulated_input"]=simulatedInput;
+                }
                 report["combat"] = combat;
             }
         }

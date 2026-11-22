@@ -227,6 +227,9 @@ impl Host {
         Ok(count)
     }
     fn echo_interactions(&self) -> Result {
+        if self.flag(Op::DesktopCapture, &[])? && self.flag(Op::EchoJustEntered, &[])? {
+            return Ok(());
+        }
         if self.flag(Op::EchoCombat, &[])? {
             return Ok(());
         }

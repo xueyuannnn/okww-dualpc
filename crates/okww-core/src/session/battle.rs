@@ -33,6 +33,14 @@ impl Host {
                 }
                 self.action(Op::Log, &[3.])?;
             }
+            if (self.flag(Op::DesktopCapture, &[])? || self.flag(Op::StreamedImage, &[])?)
+                && self.flag(Op::HasEndCondition, &[])?
+                && self.flag(Op::EndCondition, &[])?
+            {
+                self.action(Op::ReleaseInput, &[])?;
+                self.action(Op::ResetCombat, &[])?;
+                return Ok(false);
+            }
             self.action(Op::CheckBreak, &[])?;
             let current = self.flag(Op::CurrentExists, &[])?;
             let python = self.flag(Op::PythonMacro, &[])?;

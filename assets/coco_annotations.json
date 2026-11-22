@@ -1319,6 +1319,12 @@
       "file_name": "upstream-20261121/images/no_target_cloud.png",
       "width": 1920,
       "height": 1080
+    },
+    {
+      "id": 306,
+      "file_name": "images/dualpc-resource-counters.png",
+      "height": 1080,
+      "width": 1920
     }
   ],
   "annotations": [
@@ -5505,6 +5511,32 @@
       "area": 899,
       "iscrowd": 0,
       "segmentation": []
+    },
+    {
+      "id": 450,
+      "image_id": 306,
+      "category_id": 295,
+      "bbox": [
+        936,
+        48,
+        34,
+        34
+      ],
+      "area": 1156,
+      "iscrowd": 0
+    },
+    {
+      "id": 451,
+      "image_id": 306,
+      "category_id": 296,
+      "bbox": [
+        1225,
+        48,
+        34,
+        34
+      ],
+      "area": 1156,
+      "iscrowd": 0
     }
   ],
   "categories": [
@@ -6976,6 +7008,16 @@
     {
       "id": 294,
       "name": "lily_slumberland",
+      "supercategory": ""
+    },
+    {
+      "id": 295,
+      "name": "reserve_counter_icon_hcenter",
+      "supercategory": ""
+    },
+    {
+      "id": 296,
+      "name": "waveplate_counter_icon_hcenter",
       "supercategory": ""
     }
   ]

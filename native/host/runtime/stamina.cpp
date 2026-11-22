@@ -211,6 +211,37 @@ StaminaValues staminaValues(const QVector<TextLine> &lines) {
 StaminaValues readStamina(TaskContext &c) {
     QVector<TextLine> lines;
     QJsonArray samples;
+    const auto iconCounters = [&]() -> StaminaValues {
+        const QString currentIcon="waveplate_counter_icon_hcenter", reserveIcon="reserve_counter_icon_hcenter";
+        if(!c.templates.contains(currentIcon) || !c.templates.contains(reserveIcon))return {};
+        const auto area=gameBox(c.frame,.40,0,.83,.11);
+        const auto findIcon=[&](const QString &name) {
+            std::optional<Match> best;
+            for(double scale:{1.,.9,1.1}) {
+                auto found=c.find(name,{.threshold=.84,.search=area,.templateScale=scale});
+                if(found && (!best || found->confidence>best->confidence))best=found;
+            }
+            return best;
+        };
+        const auto current=findIcon(currentIcon), reserve=findIcon(reserveIcon);
+        if(!current || !reserve || reserve->center().x()>=current->center().x() ||
+           std::abs(current->center().y()-reserve->center().y())>c.frame.rows*.018)return {};
+        const auto number=[&](const Match &icon) {
+            QSet<int> values;
+            for(const auto &line:lines) {
+                const auto centre=line.center();
+                if(centre.x()<icon.box.right()+c.frame.cols*.025 ||
+                   centre.x()>icon.box.left()+c.frame.cols*.135 ||
+                   std::abs(centre.y()-icon.center().y())>c.frame.rows*.025)continue;
+                const auto text=line.text.trimmed();
+                if(QRegularExpression("^\\d{1,4}$").match(text).hasMatch())values.insert(text.toInt());
+            }
+            return values.size()==1 ? *values.cbegin() : -1;
+        };
+        const int main=number(*current), backup=number(*reserve);
+        if(main<0 || backup<0)return {};
+        return {main,backup,main+backup};
+    };
     const auto record = [&](const QString &mode) {
         QJsonArray entries;
         for(const auto &line:lines)entries.append(line.json());
@@ -258,7 +289,8 @@ StaminaValues readStamina(TaskContext &c) {
                                                   break;
                                               }
                                               case rust::WorkflowOp::StaminaTextValues: {
-                                                  const auto value = staminaValues(lines);
+                                                  auto value = staminaValues(lines);
+                                                  if(value.current<0)value=iconCounters();
                                                   out[0] = value.current;
                                                   out[1] = value.reserve;
                                                   out[2] = value.total;

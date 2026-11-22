@@ -3,6 +3,33 @@
 #include "vision_abi.hpp"
 #include <opencv2/imgproc.hpp>
 namespace okww::runtime {
+TargetRingEvidence targetRingEvidence(const cv::Mat &image, const cv::Mat &reference) {
+    if(image.empty() || reference.empty() || image.size()!=reference.size() ||
+       image.type()!=CV_8UC3 || reference.type()!=CV_8UC3)return {};
+    cv::Mat expected, observed, ring, gold, innerRim, outerRim, neutral, control, corners;
+    cv::cvtColor(reference,expected,cv::COLOR_BGR2HSV);
+    cv::cvtColor(image,observed,cv::COLOR_BGR2HSV);
+    cv::inRange(expected,cv::Scalar(12,65,55),cv::Scalar(45,255,255),ring);
+    cv::inRange(observed,cv::Scalar(10,35,55),cv::Scalar(48,255,255),gold);
+    cv::dilate(ring,innerRim,cv::Mat::ones(3,3,CV_8U));
+    cv::dilate(ring,outerRim,cv::Mat::ones(5,5,CV_8U));
+    cv::inRange(expected,cv::Scalar(0,0,0),cv::Scalar(179,120,200),neutral);
+    // A scene-wide gold tint reaches the surrounding pixels as well as the rim.
+    control=outerRim & ~innerRim & neutral;
+    corners=cv::Mat::zeros(ring.size(),CV_8U);
+    const int w=std::max(1,qRound(image.cols*.2)),h=std::max(1,qRound(image.rows*.2));
+    for(const auto &p:{cv::Point(0,0),cv::Point(image.cols-w,0),
+                       cv::Point(0,image.rows-h),cv::Point(image.cols-w,image.rows-h)})
+        corners(cv::Rect(p.x,p.y,w,h)).setTo(255);
+    corners &= neutral;
+    const int ringPixels=cv::countNonZero(ring), controlPixels=cv::countNonZero(control);
+    if(ringPixels<4 || controlPixels<4)return {};
+    const int cornerPixels=cv::countNonZero(corners);
+    const double background=std::max(double(cv::countNonZero(gold & control))/controlPixels,
+        cornerPixels>=4 ? double(cv::countNonZero(gold & corners))/cornerPixels : 0.);
+    return {double(cv::countNonZero(gold & ring))/ringPixels,
+            background};
+}
 bool systemRunDialogConfirmed(const QVector<TextLine> &lines) {
     return rust::visionRun(
                rust::VisionMethod::RunDialog, {}, [&](rust::VisionOp op, const double *a, double *out) {
@@ -626,7 +653,7 @@ bool CombatVision::hasTarget(bool allowShort, bool extended) {
 TargetObservation CombatVision::targetObservation(bool allowShort, bool extended) {
     QString has, no;
     QStringList names;
-    cv::Mat ring;
+    cv::Mat ring, reference;
     QRect area;
     std::optional<Match> raw, yes, absent;
     const std::array args{double(allowShort), double(extended)};
@@ -661,8 +688,7 @@ TargetObservation CombatVision::targetObservation(bool allowShort, bool extended
                 break;
             }
             case rust::VisionOp::LoadTargetRing: {
-                const auto reference =
-                    context_.templates.pattern(has, {context_.frame.cols, context_.frame.rows});
+                reference = context_.templates.pattern(has, {context_.frame.cols, context_.frame.rows});
                 cv::Mat hsv;
                 cv::cvtColor(reference, hsv, cv::COLOR_BGR2HSV);
                 cv::inRange(hsv, cv::Scalar(12, 65, 55), cv::Scalar(45, 255, 255), ring);
@@ -746,6 +772,11 @@ TargetObservation CombatVision::targetObservation(bool allowShort, bool extended
             }
             case rust::VisionOp::GoldRatio: {
                 const auto b = raw->box;
+                if(context_.streamedCapture) {
+                    const auto evidence=targetRingEvidence(context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference);
+                    out[0]=evidence.distinct() ? evidence.ring : 0;
+                    break;
+                }
                 cv::Mat hsv, gold;
                 cv::cvtColor(context_.frame(cv::Rect(b.x(), b.y(), b.width(), b.height())), hsv,
                              cv::COLOR_BGR2HSV);
@@ -760,16 +791,53 @@ TargetObservation CombatVision::targetObservation(bool allowShort, bool extended
             }
             case rust::VisionOp::RawHasTarget: {
                 out[0] = raw->name == has;
+                if(context_.streamedCapture && out[0]!=0) {
+                    const auto b=raw->box;
+                    out[0]=raw->confidence>=.75 && targetRingEvidence(
+                        context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference).distinct();
+                }
                 break;
             }
             default:
                 fail("Rust Target 识别宿主操作无效");
             }
         });
+    targetEvidence_={{"matched",result[0]!=0},{"locked",result[1]!=0},{"extended",result[2]!=0},
+                     {"frame_sequence",QString::number(context_.frameVersion)}};
+    if(raw) {
+        const auto b=raw->box;
+        targetEvidence_["confidence"]=raw->confidence;
+        targetEvidence_["template"]=raw->name;
+        targetEvidence_["box"]=QJsonArray{b.x(),b.y(),b.width(),b.height()};
+        if(context_.streamedCapture && !reference.empty()) {
+            const auto e=targetRingEvidence(context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference);
+            targetEvidence_["gold_ring"]=e.ring;targetEvidence_["gold_background"]=e.background;
+            targetEvidence_["gold_contrast"]=e.ring-e.background;
+        }
+    }
     return {result[0] != 0, result[1] != 0, result[2] != 0};
 }
 bool CombatVision::healthBar(bool inCombat) {
     const auto &image = context_.frame;
+    // Desktop frames also contain the player HUD and remote-client chrome.
+    // Those red strips cannot count as enemy health, even during a rotation.
+    if (context_.streamedCapture) {
+        const auto area = gameBox(image, .08, .10, .86, .84);
+        const auto bars = colorRectangles(image, {{55, 55, 174}, {76, 85, 225}},
+            std::max(12., image.cols * 40. / 3840.), std::max(2., image.rows * 9. / 2160.),
+            std::max(6., image.rows * 27. / 2160.), area, context_.streamedImage() ? .6 : .95);
+        for (const auto &bar : bars)
+            if (bar.box.width() >= bar.box.height() * 4 && bar.box.width() <= image.cols * .28)
+                return true;
+        const auto bossArea = Templates::anchored({1269, 58, 1264, 142}, {3840, 2160},
+                                                 {image.cols, image.rows}, true, true);
+        const auto bossBars = colorRectangles(image, {{4, 30, 245}, {75, 185, 255}},
+            std::max(12., image.cols * 40. / 3840.), std::max(2., image.rows * 11.7 / 2160.),
+            image.rows * 32. / 2160., bossArea, context_.streamedImage() ? .85 : .95);
+        return std::any_of(bossBars.begin(), bossBars.end(), [](const auto &bar) {
+            return bar.box.width() >= bar.box.height() * 6;
+        });
+    }
     const std::array args{double(inCombat)};
     return rust::visionRun(
                rust::VisionMethod::Health, args, [&](rust::VisionOp op, const double *a, double *out) {

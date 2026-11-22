@@ -106,6 +106,12 @@ struct NavigationBridge {
                     out[0] = c.state->inCombat;
                     break;
                 }
+                case rust::WorkflowOp::CanBackToWorld:
+                    out[0] = c.canBackToWorld();
+                    break;
+                case rust::WorkflowOp::DesktopCapture:
+                    out[0] = c.streamedCapture;
+                    break;
                 case rust::WorkflowOp::RetryingStep: {
                     out[0] = c.state->retryingStep;
                     break;

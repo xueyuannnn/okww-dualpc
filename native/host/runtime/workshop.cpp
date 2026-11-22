@@ -824,9 +824,11 @@ PythonTeamMacro::WorkshopResult PythonTeamMacro::runWorkshop(int method, std::sp
                           {"stride", image.cols * 3},
                           {"format", "RGB3"},
                           {"sequence", QString::number(sequence ? sequence : frameCopies_)}};
-                if (h_.workshopVisionConfig()["desktop"].toBool())
+                if (h_.workshopVisionConfig()["desktop"].toBool()) {
+                    result["desktop_capture"] = true;
                     result["party_hud"] = QJsonObject{{"visible", h_.inTeam()},
                         {"current", h_.partyIndex()}, {"size", h_.partyCount()}};
+                }
                 break;
             case rust::WorkflowOp::WorkshopHasLastFrameTime:
                 out[0] = lastFrameAt_ != 0;

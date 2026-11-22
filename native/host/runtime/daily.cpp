@@ -271,7 +271,13 @@ DailyProgress observeDailyProgress(TaskContext &c, QJsonObject *observation) {
                           }
                           case rust::WorkflowOp::ReadDailyProgress: {
                               result = dailyProgress(objectives, a[0] != 0 ? points : QVector<TextLine>{});
-                              if (result.points > 100) result.points = -1;
+                              // The displayed total can exceed the last reward tier.
+                              // Keep the page/strip anchors: a nearby number alone is insufficient.
+                              const auto validPoints = [&](int value) {
+                                  return value >= 0 && (value <= 100 ||
+                                      (value <= 990 && value % 10 == 0 && dailyRewardAnchors(strip, c.frame) >= 3));
+                              };
+                              if (!validPoints(result.points)) result.points = -1;
                               if (a[0] != 0 && result.points < 0 && c.streamedImage()) {
                                   auto local = enlarged("counter", counter);
                                   // A crop can detect neighbouring text at its edge.
@@ -280,7 +286,7 @@ DailyProgress observeDailyProgress(TaskContext &c, QJsonObject *observation) {
                                       return !counter.contains(line.center().toPoint());
                                   }), local.end());
                                   const auto recovered = dailyProgress({}, local).points;
-                                  if (recovered >= 0 && recovered <= 100) result.points = recovered;
+                                  if (validPoints(recovered)) result.points = recovered;
                               }
                               break;
                           }
@@ -572,7 +578,7 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
             const auto after = dailyClaimState(dailyObservation_, progress);
             const int oldPoints = before["points"].toInt(-1);
             const bool valid = oldPoints >= 0 && dailyObservation_["page_confirmed"].toBool() &&
-                               progress.points >= oldPoints && progress.points <= 100;
+                               progress.points >= oldPoints && progress.points <= 990;
             bool confirmed = valid && progress.points > oldPoints;
             if (!confirmed && valid && after["claimable_buttons"].toInt() < before["claimable_buttons"].toInt()) {
                 // A single missing OCR button is not an acknowledgement. At the

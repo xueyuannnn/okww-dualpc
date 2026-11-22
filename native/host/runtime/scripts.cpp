@@ -339,6 +339,7 @@ QJsonObject ScriptRuntime::rustScript(int method, QJsonObject request, QJsonObje
                           {"size", double(frame.total() * 3)},
                           {"format", "RGB3"},
                           {"sequence", double(c_.frameVersion)}};
+                if (c_.streamedCapture) result["desktop_capture"] = true;
                 break;
             case rust::WorkflowOp::ScriptReportProgress:
                 c_.reportProgress(request["stage"].toString("执行脚本"), request["current"].toDouble(-1),

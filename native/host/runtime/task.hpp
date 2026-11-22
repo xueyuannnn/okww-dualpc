@@ -82,6 +82,7 @@ class TaskContext {
     void key(const QString &key, double after = 0, double hold = .02);
     QString hotkey(const QString &setting, const QString &fallback) const;
     bool inTeam();
+    bool canBackToWorld();
     PartyHud party();
     bool monthlyCard();
     void monthlyWindow();

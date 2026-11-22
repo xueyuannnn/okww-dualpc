@@ -62,7 +62,7 @@ impl Host {
                 if self.flag(Op::InTeam, &[])? {
                     return Ok(true);
                 }
-                if back {
+                if back && self.flag(Op::CanBackToWorld, &[])? {
                     self.action(Op::Key, &[0., 2.])?;
                 }
                 Ok(false)
@@ -104,7 +104,13 @@ impl Host {
             self.confirm(true)?;
         }
         if !self.observe(
-            || Ok(self.flag(Op::InTeam, &[])? && !self.in_realm()?),
+            || {
+                if self.flag(Op::DesktopCapture, &[])? {
+                    self.in_world()
+                } else {
+                    Ok(self.flag(Op::InTeam, &[])? && !self.in_realm()?)
+                }
+            },
             timeout,
             0.,
         )? {
@@ -131,7 +137,7 @@ impl Host {
                     if self.flag(Op::Login, &[])? || self.flag(Op::MonthlyCard, &[])? {
                         return Ok(false);
                     }
-                    if back {
+                    if back && self.flag(Op::CanBackToWorld, &[])? {
                         self.action(Op::Key, &[0., 2.])?;
                     }
                     Ok(false)

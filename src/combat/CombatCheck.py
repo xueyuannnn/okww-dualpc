@@ -147,6 +147,9 @@ class CombatCheck(BaseWWTask):
         if self._in_combat:
             if self.scene.in_combat() is not None:
                 return self.scene.in_combat()
+            if (getattr(self, '_native_vision', {}).get('desktop', False)
+                    and self.combat_end_condition is not None and self.combat_end_condition()):
+                return self.reset_to_false(reason='end condition reached')
             self.check_f_break()
             if current_char := self.get_current_char():
                 if current_char.skip_combat_check():
@@ -317,7 +320,8 @@ class CombatCheck(BaseWWTask):
             best = self.find_best_match_in_box(self.get_box_by_name(has_name).scale(1.1, 2.0),
                                                [has_name, no_name],
                                                threshold=threshold)
-            if best and self.esc_count == 0:
+            if (best and best.name == has_name and self.esc_count == 0
+                    and not getattr(self, '_native_vision', {}).get('desktop', False)):
                 if double_check:
                     logger.error(f'try fix bear echo')
                     self.send_key('esc', after_sleep=2)
@@ -327,6 +331,11 @@ class CombatCheck(BaseWWTask):
                 else:
                     self.sleep(1)
                     return self.has_target(double_check=True)
+        if best and getattr(self, '_native_vision', {}).get('desktop', False):
+            from dualpc.combat import desktop_target_ring_evidence
+            feature = self.get_feature_by_name(has_name)
+            return (best.confidence >= .75 and feature is not None
+                    and desktop_target_ring_evidence(best.crop_frame(self.frame), feature.mat))
         return best and best.name == has_name
 
     def target_enemy(self, wait=True):
@@ -352,6 +361,9 @@ class CombatCheck(BaseWWTask):
         return bool(getattr(self, '_native_vision', {}).get('streamed', False)) or self.is_cloud_game()
 
     def has_health_bar(self):
+        if getattr(self, '_native_vision', {}).get('desktop', False):
+            from dualpc.combat import desktop_health_bar
+            return desktop_health_bar(self.frame, relaxed=self.is_streamed_image())
         if self._in_combat:
             min_height = self.height_of_screen(9 / 2160)
             max_height = min_height * 3

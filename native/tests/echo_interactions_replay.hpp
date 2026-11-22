@@ -73,6 +73,9 @@ struct Probe {
         rust::workflowRun(rust::WorkflowMethod::EchoInteractions, {},
                           [&](rust::WorkflowOp op, const double *a, double *out) {
                               switch (op) {
+                              case rust::WorkflowOp::DesktopCapture:
+                                  out[0] = false;
+                                  break;
                               case rust::WorkflowOp::EchoCombat:
                                   out[0] = combat_.active();
                                   break;

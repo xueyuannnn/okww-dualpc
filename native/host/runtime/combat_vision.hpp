@@ -23,6 +23,11 @@ struct Cooldowns {
 struct TargetObservation {
     bool matched = false, locked = false, extended = false;
 };
+struct TargetRingEvidence {
+    double ring = 0, background = 0;
+    bool distinct() const { return ring >= .35 && ring - background >= .15; }
+};
+TargetRingEvidence targetRingEvidence(const cv::Mat &image, const cv::Mat &reference);
 bool systemRunDialogConfirmed(const QVector<TextLine> &lines);
 QVector<Match> shiftedBarCandidates(const cv::Mat &frame);
 int segmentedGaugeValue(const cv::Mat &image, ColorRange color, int segments, int minFrequency,
@@ -36,6 +41,7 @@ class CombatVision {
     uint64_t partyVersion_ = UINT64_MAX, cdVersion_ = UINT64_MAX;
     PartyHud party_;
     QMap<int, Cooldowns> cooldowns_;
+    QJsonObject targetEvidence_;
     std::optional<Match> best(QRect region, QStringList names, double threshold);
 
   public:
@@ -49,6 +55,7 @@ class CombatVision {
     const QMap<int, Cooldowns> &cooldowns() const { return cooldowns_; }
     bool hasTarget(bool allowShort = false, bool extended = false);
     TargetObservation targetObservation(bool allowShort = false, bool extended = false);
+    const QJsonObject &targetEvidence() const { return targetEvidence_; }
     bool healthBar(bool inCombat);
     bool shiftedHealthBar();
     bool deathDialog();
