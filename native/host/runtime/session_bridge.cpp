@@ -393,6 +393,13 @@ bool CombatSession::rustAccess(rust::SessionOp op, const double *a, double *out,
         out[2] = hud.current;
         return true;
     }
+    case O::WaitCurrentRestore:
+        out[0] = context_.wait([&] {
+            watchdog();
+            const auto hud = vision_.party();
+            return hud.visible && hud.current >= 0 && hud.size == int(party_.size());
+        }, a[0], .05);
+        return true;
     case O::MemberIndex:
         out[0] = party_.at(size_t(a[0]))->state.index;
         return true;

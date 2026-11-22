@@ -928,6 +928,17 @@ class BaseWWTask(BaseTask):
         return current_direction, current_adjust, False
 
     def in_team(self):
+        manager = getattr(getattr(self, 'executor', None), 'device_manager', None)
+        reader = getattr(getattr(manager, 'capture_method', None), 'reader', None)
+        if getattr(reader, 'native_party_hud_supported', False) is True:
+            # Access the frame before its metadata: both belong to the same
+            # host observation, without another image copy or bridge request.
+            _ = self.frame
+            hud = reader.native_party_hud
+            if hud is not None:
+                if hud[0]:
+                    self.logged_in = True
+                return hud
         arr = []
         for name in ('char_1_text', 'char_2_text', 'char_3_text'):
             found = self.find_one(name, threshold=0.8, horizontal_variance=.006, vertical_variance=.012)

@@ -50,7 +50,7 @@ impl Host {
                 return Ok(false);
             }
             if self.flag(Op::TargetLocked, &[])? {
-                if self.flag(Op::CloudMode, &[])? {
+                if self.flag(Op::CloudMode, &[])? || self.flag(Op::StreamedImage, &[])? {
                     self.action(Op::SetLastHealthSeen, &[self.now()?])?;
                 }
                 self.action(Op::SetCheckedVersionFrame, &[])?;
@@ -65,6 +65,20 @@ impl Host {
                 let last = self.call(Op::LastHealthSeen, &[])?;
                 let grace = self.call(Op::CloudHealthGrace, &[])?.clamp(0., 5.);
                 if last >= 0. && self.now()? - last < grace {
+                    self.action(Op::SetCheckedVersionFrame, &[])?;
+                    return Ok(true);
+                }
+            }
+            if self.flag(Op::StreamedImage, &[])? && !self.flag(Op::CloudMode, &[])? {
+                if self.flag(Op::HasEndCondition, &[])? && self.flag(Op::EndCondition, &[])? {
+                    self.action(Op::ResetCombat, &[])?;
+                    return Ok(false);
+                }
+                // Compression can hide both target and enemy HP briefly.
+                // This is a bounded hold, not fresh evidence: never extend its
+                // timestamp without observing a target/health bar again.
+                let last = self.call(Op::LastHealthSeen, &[])?;
+                if last >= 0. && self.now()? - last < 0.9 {
                     self.action(Op::SetCheckedVersionFrame, &[])?;
                     return Ok(true);
                 }

@@ -104,6 +104,7 @@ class CombatSession final : public CombatHost {
     QJsonObject workshopTaskConfig() const override;
     QJsonObject workshopVisionConfig() const override {
         return {{"cloud", context_.cloudGame()}, {"streamed", context_.streamedImage()},
+                {"desktop", context_.streamedCapture},
                 {"grace", context_.profile.value("Cloud Game", "Health Lost Grace", 3.)},
                 {"retarget_interval", context_.profile.value("Cloud Game", "Retarget Interval", .8)}};
     }

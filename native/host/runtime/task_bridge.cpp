@@ -18,6 +18,7 @@ std::array<double, 3> TaskContext::rustRun(int method, std::initializer_list<dou
         const QJsonObject *request = nullptr;
         QJsonObject step;
         QJsonArray samples, outputSteps;
+        QJsonArray remoteScores{QJsonValue(), QJsonValue(), QJsonValue()};
     } context;
     context.task = this;
     context.request = &request;
@@ -127,6 +128,17 @@ std::array<double, 3> TaskContext::rustRun(int method, std::initializer_list<dou
                     break;
                 case rust::TaskOp::PartyProbe: {
                     static const QStringList names{"char_1_text", "char_2_text", "char_3_text"};
+                    if (a[1] == 2) {
+                        double score = 0;
+                        for (double scale : {1., .9, 1.1})
+                            if (auto match = c.find(names.at(int(a[0])), {.threshold = 0, .horizontal = .006,
+                                    .vertical = .012, .grayscale = true, .templateScale = scale, .blurSigma = .6}))
+                                score = std::max(score, match->confidence);
+                        context.remoteScores[int(a[0])] = score;
+                        out[0] = score >= .8;
+                        out[1] = score >= .75;
+                        break;
+                    }
                     out[0] = a[1] == 0
                                  ? bool(c.find(names.at(int(a[0])), {.horizontal = .006, .vertical = .012}))
                                  : bool(c.find(names.at(int(a[0])), {.threshold = .84,
@@ -136,6 +148,12 @@ std::array<double, 3> TaskContext::rustRun(int method, std::initializer_list<dou
                                                                      .blurSigma = .9}));
                     break;
                 }
+                case rust::TaskOp::RemotePartyState:
+                    c.partyObservation = {{"source", "remote"}, {"marker_mask", int(a[0])}};
+                    c.partyObservation["fallback_scores"] = context.remoteScores;
+                    out[0] = c.knownRemotePartySize_;
+                    out[1] = c.lastRemotePartySeen_ < 0 ? -1 : c.execution.now() - c.lastRemotePartySeen_;
+                    break;
                 case rust::TaskOp::MonthlyTemplate:
                     out[0] =
                         bool(c.find("monthly_card", {.threshold = .65, .horizontal = .05, .vertical = .05}));

@@ -24,6 +24,11 @@ class TaskContext {
     QJsonObject timingHistory_;
     QString timingPath_, workflowTask_;
     double workflowBegan_ = 0;
+    uint64_t remotePartyVersion_ = UINT64_MAX;
+    cv::Size remotePartySize_;
+    PartyHud remoteParty_;
+    int knownRemotePartySize_ = 0;
+    double lastRemotePartySeen_ = -1;
     void publishWorkflow();
     std::array<double, 3> rustRun(int method, std::initializer_list<double> args = {},
                                   const QJsonObject &request = {});
@@ -38,6 +43,7 @@ class TaskContext {
     QString task;
     QString gameLanguage = "zh_CN";
     bool streamedCapture = false;
+    QJsonObject partyObservation;
     bool cloudGame() const { return profile.value("Cloud Game", "Enabled", false).toBool(); }
     bool streamedImage() const {
         return (streamedCapture || cloudGame()) && profile.value("Cloud Game", "Compressed Image Tolerance", true).toBool();

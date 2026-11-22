@@ -83,6 +83,9 @@ impl Host {
             }
             let hud = self.values(Op::ReadHud, &[])?;
             if hud[0] == 0. {
+                if self.flag(Op::StreamedImage, &[])? && self.flag(Op::WaitCurrentRestore, &[1.])? {
+                    continue;
+                }
                 self.action(Op::Watchdog, &[])?;
                 return self.fail(14.);
             }

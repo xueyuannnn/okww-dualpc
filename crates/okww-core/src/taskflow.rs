@@ -8,6 +8,7 @@ mod menus;
 mod text;
 pub(crate) use text::{marker_mask, monthly_day, monthly_offset};
 mod image;
+mod party;
 mod workflow;
 type Result<T = ()> = std::result::Result<T, i32>;
 #[repr(C)]
@@ -233,6 +234,7 @@ impl Host {
             Method::Refresh => self.refresh()?,
             Method::Sleep => self.sleep(args[0])?,
             Method::Party => return self.party(),
+            Method::RemoteParty => return self.remote_party(),
             Method::MonthlyCard => return Ok([self.monthly_card()? as u8 as f64, 0., 0.]),
             Method::MonthlyWindow => self.monthly_window()?,
             Method::SkipConfirm => return Ok([self.skip_confirm()? as u8 as f64, 0., 0.]),

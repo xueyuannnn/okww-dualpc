@@ -21,6 +21,10 @@ class WorkshopHost final : public test::TeamReplay {
     bool interruptWorkerStartup = false;
     int resultAfter = 0;
     QJsonObject taskConfig;
+    bool desktop = false;
+    QJsonObject workshopVisionConfig() const override {
+        return {{"desktop",desktop},{"streamed",desktop},{"cloud",false}};
+    }
     QJsonObject workshopTaskConfig() const override { return taskConfig; }
     void workshopCheckpoint() override {
         if (interruptWorkerStartup && !macroBusy) {
@@ -110,6 +114,25 @@ class WorkshopTests final : public QObject {
             }
     }
   private slots:
+    void desktopWorkshopUsesHostHudForAllThreeSlots() {
+        QTemporaryDir data;
+        seed(data.path());
+        TeamStore store(root,data.path());
+        for(const auto &value:team) {
+            const auto name=value.toString();
+            store.saveDraft(team,name+".py","from src.char."+name+" import "+name+" as Native\n"
+                "class "+name+"(Native):\n    def do_perform(self):\n"
+                "        self.task.next_frame()\n"
+                "        assert self.task.in_team() == (True, self.index, 3), self.task.in_team()\n");
+        }
+        WorkshopHost host;host.desktop=true;
+        auto macro=store.create(store.selection(host),host);macro->reset();
+        for(int i=0;i<3;++i) {
+            host.hudIndex=i;
+            QVERIFY(macro->perform(*host.characters()[i]));
+        }
+        QVERIFY(host.keys.isEmpty());QCOMPARE(host.buttons,0);
+    }
     void reportedWorkshopArchiveImportsValidatesAndSwitchesModes() {
         const auto archive = qEnvironmentVariable("OKWW_WORKSHOP_REGRESSION_ZIP");
         if (archive.isEmpty()) QSKIP("Set OKWW_WORKSHOP_REGRESSION_ZIP to replay a reported archive");

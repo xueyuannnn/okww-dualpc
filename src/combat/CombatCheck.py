@@ -155,7 +155,7 @@ class CombatCheck(BaseWWTask):
                 self.log_info('on_combat_check failed')
                 return self.reset_to_false(reason='on_combat_check failed')
             if self.has_target():
-                if self.is_cloud_game():
+                if self.is_cloud_game() or getattr(self, '_native_vision', {}).get('desktop', False):
                     self._cloud_last_health_seen = time.monotonic()
                 self.last_in_realm_not_combat = 0
                 return self.scene.set_in_combat()
@@ -168,6 +168,10 @@ class CombatCheck(BaseWWTask):
                     return self.scene.set_in_combat()
             if self.combat_end_condition is not None and self.combat_end_condition():
                 return self.reset_to_false(reason='end condition reached')
+            if (getattr(self, '_native_vision', {}).get('desktop', False)
+                    and self._cloud_last_health_seen is not None
+                    and time.monotonic() - self._cloud_last_health_seen < .9):
+                return self.scene.set_in_combat()
             if self.target_enemy(wait=True):
                 logger.debug(f'retarget enemy succeeded')
                 return self.scene.set_in_combat()

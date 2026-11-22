@@ -29,7 +29,23 @@ QString TaskContext::hotkey(const QString &setting, const QString &fallback) con
 }
 bool TaskContext::inTeam() { return party().visible; }
 PartyHud TaskContext::party() {
-    const auto result = rustRun(int(rust::TaskMethod::Party));
+    if (streamedImage() && remotePartyVersion_ == frameVersion && remotePartySize_ == frame.size())
+        return remoteParty_;
+    const auto result = rustRun(int(streamedImage() ? rust::TaskMethod::RemoteParty : rust::TaskMethod::Party));
+    if (streamedImage()) {
+        remotePartyVersion_ = frameVersion;
+        remotePartySize_ = frame.size();
+        remoteParty_ = {result[0] != 0, int(result[1]), int(result[2])};
+        if (remoteParty_.visible && remoteParty_.current >= 0) {
+            knownRemotePartySize_ = remoteParty_.size;
+            lastRemotePartySeen_ = execution.now();
+        } else if (!remoteParty_.visible && execution.now() - lastRemotePartySeen_ > 2.) {
+            knownRemotePartySize_ = 0;
+        }
+        partyObservation["current"] = remoteParty_.current;
+        partyObservation["size"] = remoteParty_.size;
+        partyObservation["visible"] = remoteParty_.visible;
+    }
     return {result[0] != 0, int(result[1]), int(result[2])};
 }
 bool TaskContext::monthlyCard() { return rustRun(int(rust::TaskMethod::MonthlyCard))[0] != 0; }

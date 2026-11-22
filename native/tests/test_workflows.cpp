@@ -117,6 +117,100 @@ struct Scenes {
 class WorkflowTests : public QObject {
     Q_OBJECT
   private slots:
+    void remotePartyRecognizesEveryActiveSlot_data() {
+        QTest::addColumn<int>("active");
+        for(int i=0;i<3;++i) QTest::newRow(qPrintable(QString::number(i+1)))<<i;
+    }
+    void remotePartyRecognizesEveryActiveSlot() {
+        QFETCH(int,active);
+        Scenes s;
+        s.c.streamedCapture=true;
+        QStringList markers;
+        for(int i=0;i<3;++i) if(i!=active) markers.append(QString("char_%1_text").arg(i+1));
+        s.frame("fight",markers);
+        cv::Mat small; cv::resize(s.frames["fight"],small,{960,540},0,0,cv::INTER_AREA);
+        std::vector<uchar> encoded; cv::imencode(".jpg",small,encoded,{cv::IMWRITE_JPEG_QUALITY,35});
+        cv::resize(cv::imdecode(encoded,cv::IMREAD_COLOR),s.frames["compressed"],cv::Size(s.size.width(),s.size.height()));
+        s.show("compressed");
+        const auto hud=s.c.party();
+        QVERIFY(hud.visible); QCOMPARE(hud.current,active); QCOMPARE(hud.size,3);
+        QVERIFY(s.events.isEmpty());
+    }
+    void remotePartialHudNeverShrinksOrGuessesATrio() {
+        Scenes s;
+        s.c.streamedCapture=true;
+        s.frame("complete",{"char_2_text","char_3_text"});
+        s.show("complete"); QCOMPARE(s.c.party().size,3);
+        for(int marker=1;marker<=3;++marker) {
+            s.frame("partial",{QString("char_%1_text").arg(marker)});
+            s.show("partial");
+            const auto hud=s.c.party();
+            QVERIFY(hud.visible); QCOMPARE(hud.current,-1); QCOMPARE(hud.size,3);
+            s.clock.time+=2.; // Missing evidence is never a reason to shrink a live trio.
+        }
+        s.show("blank"); QVERIFY(!s.c.party().visible);
+        s.frame("duo",{"char_1_text"});s.show("duo");
+        QCOMPARE(s.c.party().size,2); QCOMPARE(s.c.party().current,1);
+        QVERIFY(s.events.isEmpty());
+    }
+    void remoteBattleLossHasABoundedHoldAndHonorsCompletion() {
+        for(bool remote:{false,true}) {
+            Scenes s;
+            s.c.streamedCapture=remote;
+            s.frame("fight",{"has_target","char_2_text","char_3_text"});
+            s.frame("lost",{"no_target","char_2_text","char_3_text"});
+            s.c.task="AutoCombatTask";s.show("fight");
+            CombatSession combat(s.c,s.root,s.directory.path());
+            QVERIFY(combat.active());s.c.refresh();QVERIFY(combat.active());
+            s.clock.time+=.2;s.show("lost");
+            if(remote) {
+                QVERIFY(combat.active());
+                s.clock.time+=.3;s.c.refresh();QVERIFY(combat.active());
+                combat.combatEndCondition=[] { return true; };
+                s.c.refresh();QVERIFY(!combat.active());
+            } else QVERIFY(!combat.active());
+        }
+        Scenes s;s.c.streamedCapture=true;
+        s.frame("fight",{"has_target","char_2_text","char_3_text"});
+        s.frame("lost",{"no_target","char_2_text","char_3_text"});
+        s.c.task="AutoCombatTask";s.show("fight");
+        CombatSession combat(s.c,s.root,s.directory.path());
+        QVERIFY(combat.active());s.c.refresh();QVERIFY(combat.active());
+        s.clock.time+=1.1;s.show("lost");QVERIFY(!combat.active());
+    }
+    void ambiguousRemoteActorWaitsBeforePerforming_data() {
+        QTest::addColumn<bool>("restores");
+        QTest::newRow("restored")<<true; QTest::newRow("still-unknown")<<false;
+    }
+    void ambiguousRemoteActorWaitsBeforePerforming() {
+        QFETCH(bool,restores);
+        using O=rust::SessionOp;
+        bool restored=false;int released=0,performed=0;
+        QVector<int> selected;
+        const auto run=[&] {
+            rust::sessionRun(rust::SessionMethod::PerformCurrent,{},[&](O op,const double *a,double *out,const std::exception_ptr &) {
+                switch(op) {
+                case O::ReadHud:out[0]=1;out[1]=3;out[2]=restored?0:-1;break;
+                case O::StreamedImage:out[0]=1;break;
+                case O::ReleaseInput:++released;break;
+                case O::WaitCurrentRestore:restored=restores;out[0]=restores;break;
+                case O::PartySize:out[0]=3;break;
+                case O::MemberIndex:out[0]=a[0];break;
+                case O::SetMemberCurrent:if(a[1]!=0)selected.append(int(a[0]));break;
+                case O::CurrentExists:out[0]=restored;break;
+                case O::Now:out[0]=1;break;
+                case O::MacroExists:out[0]=0;break;
+                case O::ActorPerform:QVERIFY(restored);++performed;break;
+                case O::SetActorPerform:case O::PublishParty:break;
+                case O::Throw:throw CombatInterrupted("unknown actor");
+                default:fail("Unexpected remote actor operation "+QString::number(int(op)));
+                }
+            });
+        };
+        if(restores) {run();QCOMPARE(performed,1);QCOMPARE(selected,QVector<int>{0});}
+        else {QVERIFY_EXCEPTION_THROWN(run(),CombatInterrupted);QCOMPARE(performed,0);}
+        QCOMPARE(released,1);
+    }
     void remoteCompressionKeepsPartyAndTargetRecognition_data() {
         QTest::addColumn<int>("quality");
         QTest::addColumn<int>("height");

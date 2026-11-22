@@ -108,6 +108,9 @@ impl Host {
         })
     }
     pub(super) fn reset_combat(&self) -> SessionResult {
+        if self.flag(Op::StreamedImage, &[])? && !self.flag(Op::CloudMode, &[])? {
+            self.action(Op::SetLastHealthSeen, &[-1.])?;
+        }
         self.set_bool(Bool::ContextCombat, false)?;
         self.action(Op::SetCount, &[Count::TargetEscCount as i32 as f64, 0.])?;
         for field in [
@@ -132,7 +135,14 @@ impl Host {
         Ok(())
     }
     pub(super) fn perform_current(&self) -> SessionResult {
-        let hud = self.values(Op::ReadHud, &[])?;
+        let mut hud = self.values(Op::ReadHud, &[])?;
+        if hud[2] < 0. && self.flag(Op::StreamedImage, &[])? {
+            self.action(Op::ReleaseInput, &[])?;
+            if !self.flag(Op::WaitCurrentRestore, &[1.5])? {
+                return self.fail(9.);
+            }
+            hud = self.values(Op::ReadHud, &[])?;
+        }
         if hud[0] != 0.
             && hud[1] == self.call(Op::PartySize, &[])?
             && hud[2] >= 0.

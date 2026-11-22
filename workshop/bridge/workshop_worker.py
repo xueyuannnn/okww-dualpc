@@ -190,6 +190,7 @@ def main():
         apply_state(task, q['host_state'])
         if op == 'reset':
             ended = False
+            task._cloud_last_health_seen = None
             task._in_combat = True
             task.combat_start = time.time()
             task.freeze_durations = []

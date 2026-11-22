@@ -25,6 +25,7 @@ int main(int argc, char **argv) {
          {"garden-scan", "Profile saved Garden template scan without issuing input"},
          {"echo", "Run original echo model on saved image"},
          {"combat", "Analyze saved combat HUD without issuing input"},
+         {"hud-probe", "Measure saved party marker matching without issuing input"},
          {"cloud", "Use browser-cloud visual rules for offline combat analysis"},
          {"streamed", "Use compressed desktop visual rules for offline combat analysis"},
          {"garden", "Analyze saved weekly overview without issuing input"},
@@ -90,6 +91,20 @@ int main(int argc, char **argv) {
         } else {
             auto image = readImage(parser.value("image"));
             report["image_size"] = QJsonArray{image.cols, image.rows};
+            if (parser.isSet("hud-probe")) {
+                Templates templates(root + "/assets/coco_annotations.json");
+                QJsonArray probes;
+                for (int slot=1;slot<=3;++slot)
+                    for (double sigma:{.6,.9,1.5,2.2})
+                        for (double scale:{.9,1.,1.1}) {
+                            auto hit=templates.one(image,QString("char_%1_text").arg(slot),
+                                {.threshold=0,.horizontal=.006,.vertical=.012,.grayscale=true,
+                                 .templateScale=scale,.blurSigma=sigma});
+                            probes.append(QJsonObject{{"slot",slot},{"sigma",sigma},{"scale",scale},
+                                {"confidence",hit?hit->confidence:0}});
+                        }
+                report["hud_probes"]=probes;
+            }
             if (parser.isSet("echo")) {
                 EchoDetector detector(root + "/assets/echo_model/echo.onnx");
                 QJsonArray cases;
@@ -231,6 +246,7 @@ int main(int argc, char **argv) {
                 QJsonArray chars;
                 Concerto concerto;
                 QJsonObject combat{{"party", hud.visible}, {"current", hud.current}, {"size", hud.size}};
+                if(context.streamedCapture) combat["hud"]=context.partyObservation;
                 if (hud.visible) {
                     for (int i = 0; i < hud.size; ++i) {
                         auto identity = vision.character(i);

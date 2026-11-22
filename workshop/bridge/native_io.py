@@ -102,6 +102,20 @@ def decode_frame(meta, data):
     raise ValueError(f"不支持的原生图像格式：{fmt}")
 
 
+def native_party_hud(meta):
+    hud = meta.get('party_hud')
+    if hud is None:
+        return None
+    if not isinstance(hud, dict) or type(hud.get('visible')) is not bool:
+        raise ValueError('原生队伍状态无效')
+    visible, current, size = hud['visible'], hud.get('current'), hud.get('size')
+    if type(current) is not int or type(size) is not int or size not in (0, 2, 3):
+        raise ValueError('原生队伍位置无效')
+    if not -1 <= current < max(size, 1) or (visible and size < 2) or (not visible and current != -1):
+        raise ValueError('原生队伍状态不一致')
+    return visible, current, size
+
+
 def install_native_io(channel, direct_input=False):
     from dualpc.capture import CaptureReader
     from dualpc.kmbox import KMBoxNet
@@ -109,6 +123,7 @@ def install_native_io(channel, direct_input=False):
     import dualpc.controllers
 
     class NativeReader(CaptureReader):
+        native_party_hud_supported = True
         def __init__(self, settings, **kwargs):
             self.settings = settings
             self.raw_size = (0, 0)
@@ -116,6 +131,7 @@ def install_native_io(channel, direct_input=False):
             self.sequence = 0
             self.error = ""
             self._closed = True
+            self.native_party_hud = None
 
         def start(self, timeout=5):
             state = channel.request("state")
@@ -132,8 +148,10 @@ def install_native_io(channel, direct_input=False):
                 return None
             meta, raw = channel.frame()
             if meta is None:
+                self.native_party_hud = None
                 return None
             image = decode_frame(meta, raw)
+            self.native_party_hud = native_party_hud(meta)
             self.raw_size = (meta["width"], meta["height"])
             self.sequence = int(meta["sequence"])
             self.actual = dict(channel.state.get("actual", {}), frame_width=meta["width"], frame_height=meta["height"])
