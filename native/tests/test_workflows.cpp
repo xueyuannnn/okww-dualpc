@@ -223,6 +223,27 @@ class WorkflowTests : public QObject {
             }
         }
     }
+    void desktopRecognitionKeepsTheSelectedModeAcrossWindowChanges() {
+        Scenes s;s.c.streamedCapture=true;
+        s.c.desktopRecognitionMode="local";
+        QJsonObject environment{{"executable","OKWW-DualPC-Native-Dev.exe"}};
+        s.c.desktopEnvironment=[&]{return environment;};
+        s.c.refresh();QVERIFY(s.c.localDesktopGame);
+        environment={{"executable","Client-Win64-Shipping.exe"}};
+        s.c.refresh();QVERIFY(s.c.localDesktopGame);
+        environment={{"executable","Moonlight.exe"}};
+        s.c.refresh();QVERIFY(s.c.localDesktopGame);
+        s.c.desktopRecognitionMode="remote";
+        s.c.refresh();QVERIFY(!s.c.localDesktopGame);
+        environment={{"executable","OKWW-DualPC-Native-Dev.exe"}};
+        s.c.refresh();QVERIFY(!s.c.localDesktopGame);
+        environment={{"executable","Client-Win64-Shipping.exe"}};
+        s.c.refresh();QVERIFY(!s.c.localDesktopGame);
+        s.c.streamedCapture=false;
+        environment={{"executable","Moonlight.exe"}};
+        s.c.refresh();QVERIFY(!s.c.localDesktopGame);
+        QVERIFY(!s.c.streamedImage());
+    }
     void remoteCompletionOverridesALingeringTarget() {
         for(bool tolerance:{false,true}) {
         Scenes s; s.c.streamedCapture=true; s.c.task="AutoCombatTask";
@@ -653,6 +674,45 @@ class WorkflowTests : public QObject {
         QCOMPARE(tabs,1);
         QCOMPARE(s.scene,QString("book"));
         QVERIFY(s.clock.time < 3);
+    }
+    void resourcePageWaitsForDelayedOrDroppedRemoteClicks_data() {
+        QTest::addColumn<int>("dropped");QTest::addColumn<double>("delay");
+        QTest::newRow("first-click")<<0<<0.;
+        QTest::newRow("remote-delay")<<0<<3.;
+        QTest::newRow("dropped-click")<<1<<0.;
+    }
+    void resourcePageWaitsForDelayedOrDroppedRemoteClicks() {
+        QFETCH(int,dropped);QFETCH(double,delay);
+        Scenes s;s.c.streamedCapture=true;
+        s.frame("daily",{"gray_book_quest","gray_book_boss"});
+        s.frame("resource",{"gray_book_boss_highlight"});
+        s.words["daily"]={s.word("活跃度",.2,.9),s.word("20",.2,.84)};
+        s.words["resource"]={s.word("120/240",.68,.04)};
+        int tabs=0,escapes=0,opens=0;double pending=-1;
+        const auto boss=s.templates.box("gray_book_boss",s.size).center();
+        s.action=[&](auto e) {
+            if(s.keyUp(e,Input::keyCode("esc")))++escapes;
+            if(s.keyUp(e,Input::keyCode("f2")))++opens;
+            if(s.leftUp(e) && (s.pointer-boss).manhattanLength()<8 && ++tabs>dropped)pending=s.clock.time+delay;
+        };
+        s.clock.tick=[&]{if(pending>=0 && s.clock.time>=pending)s.scene="resource";};
+        s.show("daily");QVERIFY(!resourceBookVisible(s.c));
+        Navigation(s.c).ensureBookPage("gray_book_boss","体力与副本页面",[&]{return resourceBookVisible(s.c);});
+        QCOMPARE(s.scene,QString("resource"));QCOMPARE(tabs,dropped+1);
+        QCOMPARE(escapes,0);QCOMPARE(opens,0);
+        QCOMPARE(readStamina(s.c).current,120);
+        const auto oldEvents=s.events.size();
+        Navigation(s.c).ensureBookPage("gray_book_boss","体力与副本页面",[&]{return resourceBookVisible(s.c);});
+        QCOMPARE(s.events.size(),oldEvents);
+    }
+    void resourcePageFailurePreservesDailyAndNeverSpendsMaterials() {
+        Scenes s;s.frame("daily",{"gray_book_quest","gray_book_boss"});s.show("daily");
+        bool recorded=false;int tabs=0;
+        s.action=[&](auto e){if(s.leftUp(e))++tabs;
+            if(s.keyUp(e,Input::keyCode("esc"))||s.keyUp(e,Input::keyCode("f2")))fail("Unexpected menu close/reopen");};
+        s.c.diagnostic=[&](QString,QJsonObject evidence){QCOMPARE(s.scene,QString("daily"));QCOMPARE(evidence["attempts"].toInt(),3);recorded=true;};
+        QVERIFY_THROWS_EXCEPTION(NavigationFailure,Navigation(s.c).ensureBookPage("gray_book_boss","体力与副本页面",[&]{return resourceBookVisible(s.c);}));
+        QVERIFY(recorded);QCOMPARE(tabs,3);QVERIFY(s.input.idle());
     }
     void dailyReusesItsPageAndRecoversDelayedOrClosedMenus_data() {
         QTest::addColumn<int>("missingFrames");

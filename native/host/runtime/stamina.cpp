@@ -4,6 +4,7 @@
 #include "multi_account.hpp"
 #include <QCryptographicHash>
 #include <QLockFile>
+#include <opencv2/imgproc.hpp>
 namespace okww::runtime {
 QString dailyCubeJournal(const QString &directory, const QString &account) {
     const auto normalized=normalizeAccount(account);
@@ -207,6 +208,27 @@ StaminaValues staminaValues(const QVector<TextLine> &lines) {
             }
         });
     return {int(values[0]), int(values[1]), int(values[2])};
+}
+bool resourceBookVisible(TaskContext &c) {
+    if(c.inTeam())return false;
+    const auto sidebar=c.templates.box("box_gray_book",{c.frame.cols,c.frame.rows});
+    if(auto selected=c.find("gray_book_boss_highlight",{.threshold=.86,.search=sidebar})) {
+        const auto b=selected->box;cv::Mat hsv,gold;
+        cv::cvtColor(c.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),hsv,cv::COLOR_BGR2HSV);
+        cv::inRange(hsv,cv::Scalar(10,55,70),cv::Scalar(50,255,255),gold);
+        if(double(cv::countNonZero(gold))/gold.total()>=.04)return true;
+    }
+    const auto header=gameBox(c.frame,.40,0,.90,.11);
+    if(c.find("waveplate_counter_icon_hcenter",{.threshold=.8,.search=header,.grayscale=true}) &&
+       c.find("reserve_counter_icon_hcenter",{.threshold=.8,.search=header,.grayscale=true}))return true;
+    const auto lines=c.text(.10,.18,.38,.91,.65);
+    QSet<QString> categories;
+    for(const auto &line:lines) {
+        auto text=line.text.simplified();
+        if(QRegularExpression("^(无音区|無音區|凝素领域|凝素領域|模拟领域|模擬領域|战歌重奏|戰歌重奏|讨伐强敌|討伐強敵|Tacet\\s*Field|Forgery\\s*Challenge|Simulation\\s*Challenge)$",
+            QRegularExpression::CaseInsensitiveOption).match(text).hasMatch())categories.insert(text);
+    }
+    return categories.size()>=2;
 }
 StaminaValues readStamina(TaskContext &c) {
     QVector<TextLine> lines;

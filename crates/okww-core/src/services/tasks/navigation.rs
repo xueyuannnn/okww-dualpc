@@ -163,6 +163,24 @@ impl Host {
             }
         }
     }
+    fn verified_book_page(&self) -> Result {
+        self.action(Op::Refresh, &[])?;
+        if self.flag(Op::GuidePageMatches, &[])? {
+            return Ok(());
+        }
+        for attempt in 0..3 {
+            self.action(Op::GuidePageOpen, &[])?;
+            self.action(Op::GuidePageSelect, &[])?;
+            if self.wait_for_interval(|| self.flag(Op::GuidePageMatches, &[]), 5., 0.25)? {
+                return Ok(());
+            }
+            if attempt < 2 {
+                self.action(Op::GuidePageRetryInfo, &[(attempt + 1) as f64])?;
+            }
+        }
+        self.action(Op::GuidePageFailure, &[])?;
+        Err(HOST_ERROR)
+    }
     fn open_book(&self, reuse_existing: bool) -> Result {
         self.retry(2., || {
             if reuse_existing {
@@ -427,8 +445,12 @@ impl Host {
     }
     fn book_page_same(&self, count: usize) -> Result<bool> {
         for i in 0..count {
-            let evidence = self.call(Op::CompareBookRows, &[i as f64, i as f64])?;
-            if evidence[0] < 0.86 || evidence[1].abs() > 0.008 {
+            let evidence = self.call(Op::CompareBookRows, &[i as f64, i as f64, 1.])?;
+            // A top-clipped title crop may be blank. Its stationary button and
+            // at least two intact rows still confirm the same ordered page.
+            if (evidence[0] < 0.86 && !(i == 0 && count >= 3 && evidence[2] != 0.))
+                || evidence[1].abs() > 0.008
+            {
                 return Ok(false);
             }
         }
@@ -465,6 +487,18 @@ impl Host {
         }
         Ok(best)
     }
+    fn settled_book_overlap(&self, previous: usize, current: &mut usize) -> Result<Option<usize>> {
+        for sample in 0..3 {
+            if let Some(offset) = self.book_page_overlap(previous, *current)? {
+                return Ok(Some(offset));
+            }
+            if sample < 2 {
+                self.action(Op::Sleep, &[0.2])?;
+                *current = self.scalar(Op::ReadProceedRows, &[])? as usize;
+            }
+        }
+        Ok(None)
+    }
     fn locate_book_entry(&self, serial: f64, total: f64, from_end: bool) -> Result<usize> {
         if !serial.is_finite()
             || serial.fract() != 0.
@@ -486,19 +520,24 @@ impl Host {
             )?;
             self.action(Op::Sleep, &[0.45])?;
             count = self.scalar(Op::ReadProceedRows, &[])? as usize;
-            self.action(Op::StoreBookRows, &[])?;
-            self.action(Op::Sleep, &[0.2])?;
-            let observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
-            if observed == count
-                && count > 0
-                && self.book_page_same(count)?
-                && (if from_end {
-                    reset >= 1
-                } else {
-                    self.flag(Op::BookAtTop, &[total])? || reset >= 1
-                })
-            {
-                top_ready = true;
+            // Repeated reset gestures can keep restarting the guide's rebound.
+            // Observe in place until two consecutive pages are stationary.
+            for _ in 0..6 {
+                self.action(Op::StoreBookRows, &[])?;
+                self.action(Op::Sleep, &[0.2])?;
+                let observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
+                let stable = observed == count && count > 0 && self.book_page_same(count)?;
+                count = observed;
+                if stable {
+                    top_ready = if from_end {
+                        reset >= 1
+                    } else {
+                        self.flag(Op::BookAtTop, &[total])? || reset >= 1
+                    };
+                    break;
+                }
+            }
+            if top_ready {
                 break;
             }
         }
@@ -537,8 +576,8 @@ impl Host {
             self.action(Op::StoreBookRows, &[])?;
             self.action(Op::Scroll, &[-2., 0.68, 0.55])?;
             self.action(Op::Sleep, &[0.45])?;
-            let observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
-            if let Some(offset) = self.book_page_overlap(count, observed)? {
+            let mut observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
+            if let Some(offset) = self.settled_book_overlap(count, &mut observed)? {
                 if offset == 0 {
                     stalled += 1;
                 } else {
@@ -550,8 +589,8 @@ impl Host {
                 // Return toward the last verified page; never assign a guessed ordinal.
                 self.action(Op::Scroll, &[1., 0.68, 0.55])?;
                 self.action(Op::Sleep, &[0.35])?;
-                let recovered = self.scalar(Op::ReadProceedRows, &[])? as usize;
-                if let Some(offset) = self.book_page_overlap(count, recovered)? {
+                let mut recovered = self.scalar(Op::ReadProceedRows, &[])? as usize;
+                if let Some(offset) = self.settled_book_overlap(count, &mut recovered)? {
                     first += offset;
                     count = recovered;
                 } else {
@@ -628,6 +667,7 @@ impl Host {
                 self.ensure_main(a[0], a[1] != 0., a.get(2).is_some_and(|v| *v != 0.))?
             }
             Method::OpenBook => self.open_book(a.first().is_some_and(|v| *v != 0.))?,
+            Method::VerifiedBookPage => self.verified_book_page()?,
             Method::SelectMonster => self.select_monster(a[0])?,
             Method::Category => self.category(a[0])?,
             Method::Waypoint => value = self.waypoint()? as u8 as f64,

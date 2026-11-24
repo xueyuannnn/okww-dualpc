@@ -61,6 +61,23 @@ class ClassicUiTests final : public QObject {
         return runtime::Profile(data.path() + "/configs-dualpc", root + "/native/resources/catalog.json");
     }
   private slots:
+    void legacyWindowCaptureKeepsItsTargetAndFrameLimitInDxgi() {
+        try {
+        QTemporaryDir data;auto config=Config::defaults();
+        config.set("kmbox.dry_run",true);config.set("kmbox.host","127.0.0.1");
+        config.set("kmbox.port",12345);config.set("kmbox.uuid","12345678");
+        config.set("capture.source","desktop");config.set("capture.local_backend","WIN32");
+        config.set("capture.recognition_mode","remote");config.set("capture.local_fps",75);
+        const QJsonObject target{{"kind","window"},{"title","saved remote"},{"exe","Moonlight.exe"}};
+        config.set("capture.local_target",target);config.save(data.path()+"/dualpc.json");
+        Window window(root,data.path(),QString{},[](Backend &,const Config &){});
+        QCOMPARE(window.findChild<QComboBox *>("captureSource")->currentData().toString(),QString("DXGI_REMOTE"));
+        QCOMPARE(window.findChild<QComboBox *>("dxgiCaptureFps")->currentText(),QString("75"));
+        const auto selected=window.findChild<QComboBox *>("localCaptureTarget")->currentData().toMap();
+        QCOMPARE(QJsonObject::fromVariantMap(selected),target);
+        } catch(const std::exception &error) { QFAIL(error.what()); }
+    }
+
     void bossDestinationIsSelectableAndPersistsSeparatelyFromBehavior_data() {
         QTest::addColumn<QString>("task");
         QTest::newRow("base") << QString("FarmEchoTask");
@@ -517,8 +534,6 @@ class ClassicUiTests final : public QObject {
         QTRY_VERIFY(card(*window, "AutoCombatTask"));
         const auto applied = readJson(data.path()+"/dualpc.json");
         QVERIFY(!window->findChild<QPushButton *>("saveDevices"));
-        auto imageMode=window->findChild<QComboBox *>("desktopRecognitionMode");
-        imageMode->setCurrentIndex(imageMode->findData("local"));
         window->findChild<QCheckBox *>("manualCapture")->setChecked(true);
         const QJsonObject values{{"capture.device_name", "Saved Capture"}, {"capture.device_index", 3},
             {"capture.width", 2560}, {"capture.height", 1440}, {"capture.fps", 165.},
@@ -574,7 +589,7 @@ class ClassicUiTests final : public QObject {
         restored->show();
         QTRY_VERIFY(card(*restored, "AutoCombatTask"));
         QVERIFY(restored->findChild<QCheckBox *>("manualCapture")->isChecked());
-        QCOMPARE(restored->findChild<QComboBox *>("desktopRecognitionMode")->currentData().toString(),QString("local"));
+        QVERIFY(!restored->findChild<QComboBox *>("desktopRecognitionMode"));
         QVERIFY(restored->findChild<QCheckBox *>("captureCrop")->isChecked());
         for (auto it = values.begin(); it != values.end(); ++it) {
             auto widget = restored->findChild<QWidget *>(it.key());
@@ -1891,102 +1906,51 @@ class ClassicUiTests final : public QObject {
         QCOMPARE(statusPanel->height(), idleHeight);
     }
     void deviceSourceSelectionsShowOnlyTheRelevantForms() {
-        QTemporaryDir data;
-        auto window = create(data);
-        auto protocols = window->findChild<QComboBox *>("boxProtocol");
-        auto forms = window->findChild<QStackedWidget *>("boxConnectionForms");
-        QVERIFY(protocols);
-        QVERIFY(forms);
-        QCOMPARE(protocols->count(), 2);
-        QCOMPARE(forms->count(), 2);
-        QCOMPARE(protocols->itemData(0).toString(), QString("kmbox_net"));
-        for (int i = 0; i < 2; ++i) {
-            protocols->setCurrentIndex(i);
-            QCOMPARE(forms->currentIndex(), i);
-        }
-        QVERIFY(!window->findChild<QSpinBox *>("kmbox.hid_vid"));
+        try {
+        QTemporaryDir data;int connections=0;
+        auto window=create(data,[&](Backend &,const Config &){++connections;});
+        auto protocols=window->findChild<QComboBox *>("boxProtocol");
+        auto boxForms=window->findChild<QStackedWidget *>("boxConnectionForms");
+        QVERIFY(protocols && boxForms);QCOMPARE(protocols->count(),2);
+        for(int i=0;i<2;++i){protocols->setCurrentIndex(i);QCOMPARE(boxForms->currentIndex(),i);}
         auto capture=window->findChild<QComboBox *>("captureSource");
-        auto captureForms=window->findChild<QStackedWidget *>("captureSourceForms");
-        QVERIFY(capture && captureForms);
-        QCOMPARE(capture->count(),3);
-        QCOMPARE(captureForms->currentIndex(),0);
-        capture->setCurrentIndex(1); QCOMPARE(captureForms->currentIndex(),1);
-        auto recognition=window->findChild<QComboBox *>("desktopRecognitionMode");
-        QVERIFY(recognition && recognition->isVisible());QCOMPARE(recognition->count(),3);
-        QCOMPARE(recognition->currentData().toString(),QString("auto"));
+        auto forms=window->findChild<QStackedWidget *>("captureSourceForms");
+        QVERIFY(capture && forms);QCOMPARE(capture->count(),3);QCOMPARE(forms->count(),2);
+        QCOMPARE(capture->itemData(0).toString(),QString("card"));
+        QCOMPARE(capture->itemData(1).toString(),QString("DXGI_LOCAL"));
+        QCOMPARE(capture->itemData(2).toString(),QString("DXGI_REMOTE"));
+        QCOMPARE(capture->findData("WIN32"),-1);
+        QVERIFY(!window->findChild<QComboBox *>("desktopRecognitionMode"));
+        auto fps=window->findChild<QComboBox *>("dxgiCaptureFps");
+        QVERIFY(fps && fps->isEditable());
+        for(int index:{1,2}) {
+            capture->setCurrentIndex(index);QCOMPARE(forms->currentIndex(),1);
+            fps->setCurrentText("90");
+            const auto saved=[&]{
+                const auto path=data.path()+"/native-device-settings.json";
+                return QFile::exists(path) ? readJson(path)["config"].toObject()["capture"].toObject() : QJsonObject{};
+            };
+            QTRY_COMPARE(saved()["local_backend"].toString(),QString("DXGI"));
+            QTRY_COMPARE(saved()["recognition_mode"].toString(),QString(index==1?"local":"remote"));
+            QTRY_COMPARE(saved()["local_fps"].toInt(),90);
+            QVERIFY(!window->findChild<QMessageBox *>("desktopRecognitionConfirmation"));
+        }
+        auto target=window->findChild<QComboBox *>("localCaptureTarget");
+        auto body=window->findChild<QWidget *>("dxgiTargetSettings");
+        auto advanced=body ? body->parentWidget()->parentWidget()->findChild<QPushButton *>("disclosure",Qt::FindDirectChildrenOnly) : nullptr;
+        QVERIFY(target && advanced);QVERIFY(!target->isVisible());advanced->click();QVERIFY(target->isVisible());
         auto inputTarget=window->findChild<QComboBox *>("localInputTarget");
         auto inputBody=window->findChild<QWidget *>("sendInputAdvanced");
         auto inputAdvanced=inputBody ? inputBody->parentWidget()->findChild<QPushButton *>("disclosure",Qt::FindDirectChildrenOnly) : nullptr;
-        QVERIFY(inputTarget && inputAdvanced);
-        QVERIFY(inputTarget->currentData().toMap().isEmpty());
-        QVERIFY(!inputTarget->isVisible());
-        inputAdvanced->click();
-        QVERIFY(inputTarget->isVisible());
-        inputTarget->addItem("测试窗口",QVariantMap{{"kind","window"},{"title","test"}});
-        inputTarget->setCurrentIndex(inputTarget->count()-1);
-        inputAdvanced->click();
-        QVERIFY(!inputTarget->isVisible());
-        auto display=window->findChild<QComboBox *>("dxgiMonitor");
-        QVERIFY(display && display->currentData().toString().isEmpty());
-        auto dxgiBody=window->findChild<QWidget *>("dxgiTargetSettings");
-        auto dxgiAdvanced=dxgiBody ? dxgiBody->parentWidget()->parentWidget()->findChild<QPushButton *>("disclosure",Qt::FindDirectChildrenOnly) : nullptr;
-        QVERIFY(dxgiAdvanced);
-        QVERIFY(!display->isVisible());
-        dxgiAdvanced->click();
-        QVERIFY(display->isVisible());
-        QVERIFY(window->findChild<QPushButton *>("refreshDxgiDisplays")->isVisible());
-        QVERIFY(!window->findChild<QComboBox *>("localCaptureTarget")->isVisible());
-        QVERIFY(!window->findChild<QCheckBox *>("capture.auto_game_region"));
-        dxgiAdvanced->click();
-        QVERIFY(!display->isVisible());
-        QVERIFY(window->findChild<QLabel *>("dxgiRefreshRate")->text().contains("显示器"));
-        QVERIFY(!window->findChild<QComboBox *>("localCaptureFps")->isVisible());
-        auto dxgiFps=window->findChild<QComboBox *>("dxgiCaptureFps");
-        auto win32Fps=window->findChild<QComboBox *>("localCaptureFps");
-        QVERIFY(dxgiFps && dxgiFps->isVisible() && dxgiFps->isEditable());
-        QCOMPARE(dxgiFps->currentText(),QString("跟随显示器刷新率"));
-        dxgiFps->setCurrentText("75");
-        QTRY_VERIFY(QFile::exists(data.path()+"/native-device-settings.json"));
-        QTRY_COMPARE(readJson(data.path()+"/native-device-settings.json")["config"].toObject()["capture"].toObject()["local_fps"].toInt(),75);
-        QVERIFY(!readJson(data.path()+"/native-device-settings.json")["config"].toObject()["capture"].toObject()["dxgi_follow_refresh"].toBool());
-        const auto dxgiArtifacts=qEnvironmentVariable("OKWW_UI_ARTIFACTS");
-        if (!dxgiArtifacts.isEmpty()) {QTest::qWait(50); window->grab().save(dxgiArtifacts+"/dxgi-foreground.png");}
-        capture->setCurrentIndex(2); QCOMPARE(captureForms->currentIndex(),2);
-        auto captureTarget=window->findChild<QComboBox *>("localCaptureTarget");
-        auto captureBody=window->findChild<QWidget *>("win32TargetSettings");
-        auto captureAdvanced=captureBody ? captureBody->parentWidget()->parentWidget()->findChild<QPushButton *>("disclosure",Qt::FindDirectChildrenOnly) : nullptr;
-        QVERIFY(captureTarget && captureAdvanced);
-        QVERIFY(win32Fps->isVisible());
-        QCOMPARE(win32Fps->currentText(),QString("75"));
-        win32Fps->setCurrentText("90");
-        QCOMPARE(dxgiFps->currentText(),QString("90"));
-        QVERIFY(!captureTarget->isVisible());
-        captureAdvanced->click(); QVERIFY(captureTarget->isVisible());
-        QVERIFY(!display->isVisible());
-        captureAdvanced->click(); QVERIFY(!captureTarget->isVisible());
-        const auto artifacts=qEnvironmentVariable("OKWW_UI_ARTIFACTS");
-        if (!artifacts.isEmpty()) {QTest::qWait(50); window->grab().save(artifacts+"/local-capture-sendinput.png");}
-        QVERIFY(window->findChild<QComboBox *>("localCaptureFps")->isEditable());
-        QTRY_COMPARE(readJson(data.path()+"/native-device-settings.json")["config"].toObject()["capture"].toObject()["local_backend"].toString(),QString("WIN32"));
-        auto saved=readJson(data.path()+"/native-device-settings.json")["config"].toObject();
-        QCOMPARE(saved["capture"].toObject()["local_backend"].toString(),QString("WIN32"));
-        QTRY_COMPARE(readJson(data.path()+"/native-device-settings.json")["config"].toObject()["capture"].toObject()["local_fps"].toInt(),90);
-        QCOMPARE(saved["kmbox"].toObject()["protocol"].toString(),QString("sendinput"));
-        QVERIFY(saved["kmbox"].toObject()["target_enabled"].toBool());
-        QCOMPARE(saved["kmbox"].toObject()["target"].toObject()["title"].toString(),QString("test"));
+        QVERIFY(inputTarget && inputAdvanced);inputAdvanced->click();
+        inputTarget->addItem("test",QVariantMap{{"kind","window"},{"title","test"}});inputTarget->setCurrentIndex(inputTarget->count()-1);
+        QTRY_VERIFY(readJson(data.path()+"/native-device-settings.json")["config"].toObject()["kmbox"].toObject()["target_enabled"].toBool());
         inputTarget->setCurrentIndex(0);
         QTRY_VERIFY(!readJson(data.path()+"/native-device-settings.json")["config"].toObject()["kmbox"].toObject()["target_enabled"].toBool());
-        capture->setCurrentIndex(1);
-        dxgiFps->setCurrentIndex(0);
-        QTRY_VERIFY(readJson(data.path()+"/native-device-settings.json")["config"].toObject()["capture"].toObject()["dxgi_follow_refresh"].toBool());
-        QCOMPARE(win32Fps->currentText(),QString("90"));
-        capture->setCurrentIndex(0); protocols->setCurrentIndex(0);
-        QCOMPARE(captureForms->currentIndex(),0); QCOMPARE(forms->currentIndex(),0);
-        captureAdvanced->click();
-        QVERIFY(!display->isVisible() && !captureTarget->isVisible());
-        captureAdvanced->click();
-        if (!artifacts.isEmpty()) {QTest::qWait(50); window->grab().save(artifacts+"/capture-card-kmbox.png");}
+        QCOMPARE(connections,0);
+        } catch(const std::exception &error) { QFAIL(error.what()); }
     }
+
     void completePortraitAssetsCoverEveryBuiltInCharacter() {
         const auto manifest = readJson(root + "/native/resources/portraits/manifest.json");
         QSet<QString> classes;

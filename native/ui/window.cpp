@@ -102,6 +102,10 @@ Window::Window(QString root, QString data, QString python,
     // User sessions always connect the selected device. Old profiles may still
     // carry the removed practice switch; only explicit offline tests use it.
     deviceDraftConfig_.normalizeBox();
+    if(deviceDraftConfig_.s("capture.source")=="desktop" && deviceDraftConfig_.s("capture.local_backend")=="WIN32") {
+        deviceDraftConfig_.set("capture.local_backend","DXGI");
+        deviceDraftConfig_.set("capture.dxgi_follow_refresh",false);
+    }
     config_.set("kmbox.dry_run", false);
     deviceDraftConfig_.set("kmbox.dry_run", false);
     deviceSaveTimer_.setSingleShot(true);
@@ -528,9 +532,10 @@ QWidget *Window::devicePage() {
     captureSource_ = new classic::ComboBox;
     captureSource_->setObjectName("captureSource");
     captureSource_->addItem("采集卡采集", "card");
-    captureSource_->addItem("DXGI 截图 · 本机桌面", "DXGI");
-    captureSource_->addItem("Win32 截图 · 本机桌面", "WIN32");
-    const auto source = deviceDraftConfig_.s("capture.source") == "desktop" ? deviceDraftConfig_.s("capture.local_backend") : "card";
+    captureSource_->addItem("DXGI 单机模式", "DXGI_LOCAL");
+    captureSource_->addItem("DXGI 远程模式", "DXGI_REMOTE");
+    const auto source = deviceDraftConfig_.s("capture.source") == "desktop"
+        ? (deviceDraftConfig_.s("capture.recognition_mode")=="remote" ? "DXGI_REMOTE" : "DXGI_LOCAL") : "card";
     captureSource_->setCurrentIndex(std::max(0, captureSource_->findData(source)));
     sourceRow->addWidget(sourceLabel); sourceRow->addWidget(captureSource_,1);
     captureLayout->addLayout(sourceRow);
@@ -631,60 +636,30 @@ QWidget *Window::devicePage() {
     dxgiRefresh_->setProperty("caption",true);
     dxgiForm->addRow("采集帧率",dxgiCaptureFps_);
     dxgiForm->addRow(dxgiRefresh_);
-    auto dxgiHint=new QLabel("默认采集主显示器，需要切换显示器时展开高级设置。帧率可跟随显示器刷新率，也可选择或输入 1–1000。实际收帧率以运行状态为准。");
+    auto dxgiHint=new QLabel("高级设置可选择显示器或窗口。窗口采集需保持可见、未遮挡，完整位于同一显示器；改变窗口尺寸后重新连接。帧率可跟随显示器刷新率，也可选择或输入 1–1000。");
     dxgiHint->setObjectName("caption"); dxgiHint->setWordWrap(true);
     dxgiForm->addRow(dxgiHint);
     captureForms_->addWidget(dxgiPanel);
-    auto localCapture = new QWidget;
-    auto localCaptureLayout = new QFormLayout(localCapture);
-    localCaptureLayout->setContentsMargins(0,10,0,0);
     auto targetRow = new QHBoxLayout;
-    auto win32TargetSettings=new QWidget;
-    win32TargetSettings->setObjectName("win32TargetSettings");
-    auto win32TargetForm=new QFormLayout(win32TargetSettings);
-    win32TargetForm->setContentsMargins(0,0,0,0);
     localCaptureTarget_ = new classic::ComboBox;
     localCaptureTarget_->setObjectName("localCaptureTarget");
     localCaptureTarget_->setMinimumWidth(180);
     localCaptureTarget_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     localCaptureTarget_->setMinimumContentsLength(24);
     const auto savedTarget = deviceDraftConfig_.get("capture.local_target").toObject();
-    localCaptureTarget_->addItem(savedTarget.isEmpty() ? "主显示器（默认）" : savedTarget["label"].toString(), savedTarget.toVariantMap());
+    localCaptureTarget_->addItem(savedTarget.isEmpty() ? "按显示器采集（默认）" : savedTarget["label"].toString(), savedTarget.toVariantMap());
     targetRow->addWidget(localCaptureTarget_,1);
-    auto refreshLocal = button("刷新列表", [this]{scanDesktopTargets();}, this);
+    auto refreshLocal = button("刷新窗口列表", [this]{scanDesktopTargets();}, this);
     refreshLocal->setObjectName("refreshLocalCapture");
     targetRow->addWidget(refreshLocal);
-    win32TargetForm->addRow("Win32 截图目标",targetRow);
-    localCaptureFps_ = new classic::ComboBox;
-    localCaptureFps_->setObjectName("localCaptureFps");
-    localCaptureFps_->setEditable(true);
-    localCaptureFps_->lineEdit()->setValidator(new QIntValidator(1,1000,localCaptureFps_));
-    for (int fps : {30,60,120,144,165,240}) localCaptureFps_->addItem(QString::number(fps));
-    localCaptureFps_->setCurrentText(QString::number(deviceDraftConfig_.n("capture.local_fps")));
-    localCaptureLayout->addRow("采集帧率",localCaptureFps_);
-    auto localCaptureHint = new QLabel("帧率可选或直接输入 1–1000。默认采集主显示器；指定窗口请展开高级设置，窗口需保持可见。");
-    localCaptureHint->setWordWrap(true); localCaptureHint->setObjectName("caption");
-    localCaptureLayout->addRow(localCaptureHint);
-    captureForms_->addWidget(localCapture);
+    dxgiTargetForm->addRow("采集窗口（可选）",targetRow);
     captureLayout->addWidget(captureForms_);
-    auto recognitionRow=new QWidget;
-    auto recognitionForm=new QFormLayout(recognitionRow);
-    recognitionForm->setContentsMargins(0,0,0,0);
-    recognitionMode_=new classic::ComboBox;
-    recognitionMode_->setObjectName("desktopRecognitionMode");
-    recognitionMode_->addItem("自动 · 区分本机游戏与远程软件","auto");
-    recognitionMode_->addItem("本机游戏 · 清晰画面","local");
-    recognitionMode_->addItem("远程画面 · 压缩容错","remote");
-    recognitionMode_->setCurrentIndex(std::max(0,recognitionMode_->findData(deviceDraftConfig_.s("capture.recognition_mode"))));
-    recognitionMode_->setToolTip("自动根据游戏或远程软件进程区分画面类型；未识别的软件可手动选择。修改后下次启动任务生效，不改变采集范围。游戏画面应完整显示为 16:9。");
-    recognitionForm->addRow("画面类型",recognitionMode_);
-    captureLayout->addWidget(recognitionRow);
     auto overlayHint = new QLabel("建议关闭 NVIDIA 帧率统计及其他性能悬浮层，避免遮挡体力、队伍和技能信息，影响识别。");
     overlayHint->setObjectName("captureOverlayHint");
     overlayHint->setWordWrap(true);
     overlayHint->setProperty("caption", true);
     captureLayout->addWidget(overlayHint);
-    auto remoteFullscreenHint=new QLabel("若使用远程软件，请开启远程软件的全屏模式，并确保游戏画面为 16:9 全屏。");
+    auto remoteFullscreenHint=new QLabel("若使用远程软件，建议开启全屏模式；也可在高级设置选择可见窗口，确保窗口内游戏画面完整且为 16:9。");
     remoteFullscreenHint->setObjectName("remoteFullscreenHint");
     remoteFullscreenHint->setWordWrap(true);
     captureLayout->addWidget(remoteFullscreenHint);
@@ -748,7 +723,6 @@ QWidget *Window::devicePage() {
     auto captureAdvanced = new QWidget;
     auto caf = new QFormLayout(captureAdvanced);
     caf->addRow(dxgiTargetSettings);
-    caf->addRow(win32TargetSettings);
     caf->addRow("采集后端", backendChoice_);
     auto inference = new classic::ComboBox;
     inferenceResolution_ = inference;
@@ -922,16 +896,14 @@ QWidget *Window::devicePage() {
     connect(protocol_, &QComboBox::currentIndexChanged, this, updateInputForm);
     connect(expand,&QPushButton::toggled,this,updateInputForm);
     updateInputForm();
-    const auto updateCaptureForm = [this,caf,manual,dxgiTargetSettings,win32TargetSettings,remoteFullscreenHint,recognitionRow] {
+    const auto updateCaptureForm = [this,caf,manual,dxgiTargetSettings,remoteFullscreenHint] {
         const bool cardMode = captureSource_->currentData().toString() == "card";
-        captureForms_->setCurrentIndex(cardMode ? 0 : captureSource_->currentData().toString()=="DXGI" ? 1 : 2);
-        remoteFullscreenHint->setVisible(!cardMode);
-        recognitionRow->setVisible(!cardMode);
+        captureForms_->setCurrentIndex(cardMode ? 0 : 1);
+        remoteFullscreenHint->setVisible(captureSource_->currentData().toString()=="DXGI_REMOTE");
         caf->setRowVisible(backendChoice_,cardMode);
         caf->setRowVisible(manualCapture_,cardMode);
         caf->setRowVisible(manual,cardMode && manualCapture_->isChecked());
-        caf->setRowVisible(dxgiTargetSettings,captureSource_->currentData().toString()=="DXGI");
-        caf->setRowVisible(win32TargetSettings,captureSource_->currentData().toString()=="WIN32");
+        caf->setRowVisible(dxgiTargetSettings,!cardMode);
     };
     connect(captureSource_, &QComboBox::currentIndexChanged, this, updateCaptureForm);
     connect(manualCapture_, &QCheckBox::toggled, this, updateCaptureForm);
@@ -962,23 +934,9 @@ QWidget *Window::devicePage() {
     connect(captureSource_, &QComboBox::currentIndexChanged, this, [this] {
         if (captureSource_->currentData().toString() != "card") scanDesktopTargets();
     });
-    for (auto choice : {backendChoice_, deviceChoice_, resolution_, format_, fps_, protocol_, inferenceResolution_, captureSource_, localCaptureTarget_, dxgiMonitor_, localInputTarget_,recognitionMode_})
+    for (auto choice : {backendChoice_, deviceChoice_, resolution_, format_, fps_, protocol_, inferenceResolution_, captureSource_, localCaptureTarget_, dxgiMonitor_, localInputTarget_})
         connect(choice, &QComboBox::currentIndexChanged, this, &Window::queueDeviceSave);
-    connect(localCaptureFps_, &QComboBox::currentTextChanged, this, [this](const QString &text) {
-        // Share the manual limit while retaining DXGI's independent automatic option.
-        if (dxgiCaptureFps_->currentText()!=dxgiCaptureFps_->itemText(0)) {
-            const QSignalBlocker blocker(dxgiCaptureFps_);
-            dxgiCaptureFps_->setCurrentText(text);
-        }
-        queueDeviceSave();
-    });
-    connect(dxgiCaptureFps_, &QComboBox::currentTextChanged, this, [this](const QString &text) {
-        if (text!=dxgiCaptureFps_->itemText(0)) {
-            const QSignalBlocker blocker(localCaptureFps_);
-            localCaptureFps_->setCurrentText(text);
-        }
-        queueDeviceSave();
-    });
+    connect(dxgiCaptureFps_, &QComboBox::currentTextChanged, this, &Window::queueDeviceSave);
     connect(manualCapture_, &QCheckBox::toggled, this, &Window::queueDeviceSave);
     connect(cropToggle, &QCheckBox::toggled, this, &Window::queueDeviceSave);
     for (auto spin : cropSpins)
@@ -1119,7 +1077,8 @@ void Window::scanDesktopTargets() {
         }
         choice->setCurrentIndex(selected);
     };
-    update(localCaptureTarget_,false);
+    update(localCaptureTarget_,true);
+    localCaptureTarget_->setItemText(0,"按显示器采集（默认）");
     update(localInputTarget_,true);
     const QSignalBlocker blocker(dxgiMonitor_);
     const auto selected=dxgiMonitor_->count()>1 ? dxgiMonitor_->currentData().toString() : deviceDraftConfig_.s("capture.dxgi_monitor");
@@ -1246,16 +1205,15 @@ void Window::filterModes() {
 }
 Config Window::deviceConfiguration(bool requireSelection) const {
     auto current = deviceDraftConfig_;
-    const auto recognition=recognitionMode_->currentData().toString();
-    if(recognition!="auto" || !current.get("capture.recognition_mode").isUndefined())
-        current.set("capture.recognition_mode",recognition);
+    current.set("capture.recognition_mode",captureSource_->currentData().toString()=="DXGI_REMOTE" ? "remote" : "local");
     current.set("kmbox.dry_run", false);
     const bool local = captureSource_->currentData().toString() != "card";
     current.set("capture.source",local ? "desktop" : "card");
-    if (local) current.set("capture.local_backend",captureSource_->currentData().toString());
+    if (local) current.set("capture.local_backend","DXGI");
     current.set("capture.local_target",QJsonObject::fromVariantMap(localCaptureTarget_->currentData().toMap()));
-    current.set("capture.local_fps",localCaptureFps_->currentText().toInt());
     current.set("capture.dxgi_follow_refresh",dxgiCaptureFps_->currentText()==dxgiCaptureFps_->itemText(0));
+    if(local && !current.b("capture.dxgi_follow_refresh"))
+        current.set("capture.local_fps",dxgiCaptureFps_->currentText().toInt());
     current.set("capture.dxgi_monitor",dxgiMonitor_->currentData().toString());
     const auto inputTarget=QJsonObject::fromVariantMap(localInputTarget_->currentData().toMap());
     current.set("kmbox.target",inputTarget);

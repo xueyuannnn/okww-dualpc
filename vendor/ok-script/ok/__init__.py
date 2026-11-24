@@ -1048,7 +1048,9 @@ class OK:
         if ocr := self.config.get('ocr'):
             isascii, path = install_path_isascii()
             ocr_target_height = ocr.get('target_height', 0)
-            if not isascii:
+            # Native bridge distributions validate their pinned OCR runtime and
+            # Unicode-safe template I/O separately; retain the legacy default.
+            if not isascii and not self.config.get('allow_unicode_install_path', False):
                 logger.info(f'show_path_ascii_error')
                 self.init_error = True
                 if self.should_init_task_manager_headless():

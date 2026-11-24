@@ -1,6 +1,7 @@
 #pragma once
 #include "task.hpp"
 namespace okww::runtime {
+bool resourceBookVisible(TaskContext &context);
 struct StaminaValues {
     int current = -1, reserve = -1, total = -1;
 };

@@ -22,8 +22,9 @@ class WorkshopHost final : public test::TeamReplay {
     int resultAfter = 0;
     QJsonObject taskConfig;
     bool desktop = false;
+    bool localGame = false;
     QJsonObject workshopVisionConfig() const override {
-        return {{"desktop",desktop},{"streamed",desktop},{"cloud",false}};
+        return {{"desktop",desktop},{"streamed",desktop && !localGame},{"local_game",localGame},{"cloud",false}};
     }
     QJsonObject workshopTaskConfig() const override { return taskConfig; }
     void workshopCheckpoint() override {
@@ -114,6 +115,96 @@ class WorkshopTests final : public QObject {
             }
     }
   private slots:
+    void workshopImagePolicyFollowsWindowChangesBetweenRotations() {
+        QTemporaryDir data;seed(data.path());TeamStore store(root,data.path());
+        store.saveDraft(team,"Baizhi.py","from src.char.Baizhi import Baizhi as Native\n"
+            "class Baizhi(Native):\n    def do_perform(self):\n"
+            "        self.task.send_key('e' if self.task._native_vision.get('local_game') else 'q', down_time=.02)\n");
+        WorkshopHost host;host.desktop=true;
+        auto macro=store.create(store.selection(host),host);macro->reset();
+        for(bool local:{false,true,false}) {
+            host.localGame=local;host.input={};QVERIFY(macro->perform(host.entry()));
+            bool found=false;
+            for(const auto &event:host.input) {
+                const auto q=event.toObject();
+                if(q["op"]=="key" && q["down"].toBool()) {
+                    QCOMPARE(q["code"].toInt(),local?8:20);found=true;
+                }
+            }
+            QVERIFY(found);
+        }
+    }
+    void nativeRecognitionSettingsLoadInEveryPythonWorker_data() {
+        QTest::addColumn<QString>("mode");
+        for(const auto &mode:{"auto","local","remote"})QTest::newRow(mode)<<QString(mode);
+    }
+    void nativeRecognitionSettingsLoadInEveryPythonWorker() {
+        try {
+        QFETCH(QString,mode);
+        QTemporaryDir data;seed(data.path());
+        auto config=Config::load(data.path()+"/dualpc.json");
+        config.set("capture.source","desktop");config.set("capture.local_backend","DXGI");
+        config.set("capture.recognition_mode",mode);config.set("kmbox.protocol","sendinput");
+        config.save(data.path()+"/dualpc.json");
+        TeamStore store(root,data.path());
+        store.saveDraft(team,"Baizhi.py",source("Baizhi"));
+        WorkshopHost host;host.desktop=true;
+        auto macro=store.create(store.selection(host),host);macro->reset();
+        QVERIFY(macro->perform(host.entry()));QVERIFY(host.keys.isEmpty());
+        const auto script=scriptManage(root,data.path(),{{"op","create"},{"name","RecognitionProbe"}})["selected"].toString();
+        scriptManage(root,data.path(),{{"op","save"},{"script",script},{"code",
+            "from ok import BaseTask\nclass RecognitionProbe(BaseTask):\n    def run(self):\n"
+            "        self.info_set('配置兼容', '通过')\n"}});
+        Profile profile(data.path()+"/configs-dualpc",root+"/native/resources/catalog.json");
+        Templates templates(root+"/assets/coco_annotations.json");SteadyClock clock;ExecutionGate gate;
+        Execution execution(gate,gate.start(),clock);
+        Input input(config,{1920,1080},true,[](auto){
+            return QJsonObject{{"capture_connected",true},{"armed",true},{"running",true},
+                {"box",QJsonObject{{"connected",true},{"keyboard",true},{"keys",QJsonArray{}},{"buttons",0}}}};
+        },execution);
+        TaskContext c(execution,input,templates,profile,[]{return cv::Mat(1080,1920,CV_8UC3,cv::Scalar(0,0,0));},
+            [](const cv::Mat &,QRect,double){return QVector<TextLine>{};});
+        c.task=script;ScriptRuntime scripts(c,root,data.path());
+        scripts.run({{"id",script},{"fields",QJsonArray{}}});
+        QCOMPARE(Config::load(data.path()+"/dualpc.json").s("capture.recognition_mode"),mode);
+        } catch(const std::exception &error) { QFAIL(error.what()); }
+    }
+    void unicodeInstallAndProfileLoadTemplatesOcrAndWorkshopCode() {
+        QTemporaryDir directory;const auto data=directory.path()+"/中文账号 数据";seed(data);
+        TeamStore store(root,data);
+        store.saveDraft(team,"Baizhi.py","from src.char.Baizhi import Baizhi as Native\n"
+            "class Baizhi(Native):\n    def do_perform(self):\n"
+            "        assert self.task.get_feature_by_name('char_2_text') is not None\n"
+            "        assert self.task.executor.ocr_lib() is not None\n"
+            "        self.task.ocr()\n"
+            "        self.task.send_key('e', down_time=.02)\n");
+        WorkshopHost host;auto macro=store.create(store.selection(host),host);macro->reset();
+        QVERIFY(macro->perform(host.entry()));QVERIFY(host.keys.isEmpty());
+        QVERIFY(!host.input.isEmpty());
+    }
+    void unicodeProfileCanValidateAndRunGeneralScript() {
+        QTemporaryDir directory;const auto data=directory.path()+"/中文脚本 配置";
+        auto config=Config::defaults();config.set("kmbox.dry_run",true);config.save(data+"/dualpc.json");
+        const auto id=scriptManage(root,data,{{"op","create"},{"name","UnicodeProbe"}})["selected"].toString();
+        scriptManage(root,data,{{"op","save"},{"script",id},{"code",
+            "from ok import BaseTask\nclass UnicodeProbe(BaseTask):\n    def run(self):\n"
+            "        assert self.get_feature_by_name('char_2_text') is not None\n"
+            "        assert self.executor.ocr_lib() is not None\n"
+            "        self.ocr()\n        self.info_set('中文路径', '运行正常')\n"}});
+        Profile profile(data+"/configs-dualpc",root+"/native/resources/catalog.json");
+        Templates templates(root+"/assets/coco_annotations.json");SteadyClock clock;ExecutionGate gate;
+        Execution execution(gate,gate.start(),clock);int actions=0;
+        Input input(config,{1920,1080},true,[&](QJsonObject q) {
+            const auto op=q["op"].toString();
+            if(op!="state" && op!="heartbeat" && op!="connect" && op!="probe" && op!="release")++actions;
+            return QJsonObject{{"capture_connected",true},{"armed",true},{"running",true},
+                {"box",QJsonObject{{"connected",true},{"keyboard",true},{"keys",QJsonArray{}},{"buttons",0}}}};
+        },execution);
+        TaskContext c(execution,input,templates,profile,[]{return cv::Mat(1080,1920,CV_8UC3,cv::Scalar(0,0,0));},
+            [](const cv::Mat &,QRect,double){return QVector<TextLine>{};});
+        c.task=id;ScriptRuntime scripts(c,root,data);
+        scripts.run({{"id",id},{"fields",QJsonArray{}}});QCOMPARE(actions,0);
+    }
     void desktopWorkshopUsesHostHudForAllThreeSlots() {
         QTemporaryDir data;
         seed(data.path());

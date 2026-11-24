@@ -265,8 +265,6 @@ impl Host {
                 break;
             }
             self.action(Op::OpenGardenWeeklyBook, &[])?;
-            self.action(Op::Sleep, &[0.5])?;
-            self.action(Op::ClickRelative, &[0.343, 0.129, 0.5])?;
             opened =
                 self.wait_for_interval(|| self.flag(Op::ReadGardenWeeklyProgress, &[]), 6., 0.3)?;
             if !opened && self.flag(Op::HasInfo, &[])? {

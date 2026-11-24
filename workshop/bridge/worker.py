@@ -52,7 +52,8 @@ def main():
     def native_config(settings, root):
         config = original_config(settings, root)
         config.pop("gui", None)
-        config.update(use_gui=False, locale="zh_CN", config_folder=str(data / "configs-dualpc"),
+        config.update(use_gui=False, locale="zh_CN", allow_unicode_install_path=True,
+                      config_folder=str(data / "configs-dualpc"),
                       dualpc_settings_path=str(data / "dualpc.json"), custom_tabs=[], use_overlay=False)
         config.update(log_file=str(data / "logs/engine.log"), error_log_file=str(data / "logs/engine-error.log"),
                       screenshots_folder=str(data / "screenshots"))

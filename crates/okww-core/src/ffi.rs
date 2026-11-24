@@ -1337,16 +1337,6 @@ pub unsafe extern "C" fn okww_rs_business_task_kind(id: *const u8, length: usize
     crate::task_ids::kind(id)
 }
 
-/// # Safety
-/// `name` borrows `length` readable UTF-8 bytes, or is null for an empty name.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn okww_rs_desktop_recognition(name: *const u8, length: usize) -> i32 {
-    let Some(name) = (unsafe { slice(name, length) }) else {
-        return 0;
-    };
-    crate::desktop_input::recognition_kind(name)
-}
-
 #[unsafe(no_mangle)]
 /// # Safety
 /// A non-null output must point to two writable u32 values.

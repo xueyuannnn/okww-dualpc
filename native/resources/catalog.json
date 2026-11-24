@@ -2490,7 +2490,7 @@
         {
             "id": "Cloud Game",
             "name": "云游戏与远程画面",
-            "description": "浏览器云游戏使用 DXGI / Win32 与 SendInput，保持 16:9 全屏。远程画面容错也适用于远程软件。",
+            "description": "浏览器云游戏使用 DXGI 与 SendInput，保持 16:9 全屏。远程画面容错也适用于远程软件。",
             "fields": [
                 {
                     "key": "Enabled",
@@ -2511,7 +2511,7 @@
                     "label": "压缩画面识别容错",
                     "value": true,
                     "kind": "boolean",
-                    "description": "仅对 DXGI / Win32 和云游戏启用低血量条补充识别，采集卡保留原规则。"
+                    "description": "仅对 DXGI 和云游戏启用低血量条补充识别，采集卡保留原规则。"
                 },
                 {
                     "key": "Health Lost Grace",

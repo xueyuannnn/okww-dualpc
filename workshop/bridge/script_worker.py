@@ -51,6 +51,7 @@ def create_runtime(root, data, channel, activity_only=False):
         config = original(settings, root)
         config.pop('gui', None)
         config.update(use_gui=False, locale='zh_CN', custom_tabs=[], use_overlay=False,
+                      allow_unicode_install_path=True,
                       config_folder=str(data / 'configs-dualpc'), custom_tasks=True,
                       dualpc_settings_path=str(data / 'dualpc.json'),
                       log_file=str(data / 'logs/scripts.log'), error_log_file=str(data / 'logs/scripts-error.log'),

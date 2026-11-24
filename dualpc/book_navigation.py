@@ -14,10 +14,8 @@ class BookRow:
     y: float = 0.0
 
 
-def similarity(left, right):
-    if len(left.title) >= 3 and left.title == right.title:
-        return 1.0
-    if left.title and right.title and left.title != right.title:
+def visual_similarity(left, right):
+    if left.identity is None or right.identity is None or not left.identity.size or not right.identity.size:
         return 0.0
     if left.identity.std() < 3:
         return 0.0
@@ -26,9 +24,29 @@ def similarity(left, right):
     return float(score) if np.isfinite(score) else 0.0
 
 
+def similarity(left, right, stationary=False):
+    if len(left.title) >= 3 and left.title == right.title:
+        return 1.0
+    visual = visual_similarity(left, right)
+    # Disregarding conflicting OCR is safe only when no scroll/click was sent.
+    if stationary and visual >= .90:
+        return visual
+    if left.title and right.title:
+        tokens = lambda title: {re.sub(r'\W', '', part).casefold()
+                                for part in title.split('|') if part.strip()}
+        a, b = tokens(left.title), tokens(right.title)
+        anchor = any(len(part) >= 3 for part in a & b)
+        if not anchor or not (a <= b or b <= a):
+            return 0.0
+        return visual if visual >= .86 else 0.0
+    return visual
+
+
 def same_page(previous, current):
     return bool(previous) and len(previous) == len(current) and all(
-        similarity(a, b) >= .86 and abs(a.y - b.y) <= .008 for a, b in zip(previous, current))
+        abs(a.y - b.y) <= .008 and (similarity(a, b, stationary=True) >= .86 or (
+            i == 0 and len(previous) >= 3 and not a.title and not b.title and a.y < .28 and b.y < .28))
+        for i, (a, b) in enumerate(zip(previous, current)))
 
 
 def overlap(previous, current):
@@ -49,14 +67,21 @@ def overlap(previous, current):
 def read_rows(task):
     frame = task.frame
     height, width = frame.shape[:2]
-    area = task.box_of_screen(.90, .205, .97, .88)
+    area = task.box_of_screen(.82, .205, .97, .88)
     buttons = list(task.find_feature('boss_proceed', box=area, threshold=.76))
     if getattr(task, '_native_vision', {}).get('desktop', False):
         buttons.extend(task.find_feature('boss_proceed', box=area, threshold=.72, use_gray_scale=True))
+    def has_button_body(button):
+        y = (button.y + button.height / 2) / height
+        band = frame[round((y - .006) * height):round((y + .006) * height),
+                     round(.875 * width):round(.935 * width)]
+        return band.size and np.mean(cv2.cvtColor(band, cv2.COLOR_BGR2GRAY) <= 80) >= .20
+    buttons = [button for button in buttons if has_button_body(button)]
     text = task.ocr(box=task.box_of_screen(.39, .18, .97, .88), threshold=.65)
     title = lambda line: str(getattr(line, 'text', getattr(line, 'name', ''))).strip()
     for line in text:
-        if line.x >= width * .90 and re.fullmatch(r'前往|传送|傳送|Proceed|Go\s*to|Teleport', title(line), re.I):
+        if line.x + line.width / 2 >= width * .84 and re.fullmatch(
+                r'前往|传送|傳送|直接挑[战戰]|Proceed|Go\s*to|Teleport|(?:Direct\s*)?Challenge|Challenge\s*Directly', title(line), re.I):
             buttons.append(line)
     unique = []
     for button in sorted(buttons, key=lambda b: getattr(b, 'confidence', 0), reverse=True):
@@ -85,14 +110,30 @@ def _locate_book_target(task, serial, total, from_end=False):
         task.scroll_relative(.68, .55, amount)
         task.sleep(.45)
 
+    def settled_overlap(previous):
+        for sample in range(3):
+            current = read_rows(task)
+            offset = overlap(previous, current)
+            if offset is not None:
+                return current, offset
+            if sample < 2:
+                task.sleep(.2)
+        return current, None
+
     current = []
     for reset in range(3):
         scroll(-100 if from_end else 100)
         previous = read_rows(task)
-        task.sleep(.2)
-        current = read_rows(task)
+        stable = False
+        for _ in range(6):
+            task.sleep(.2)
+            current = read_rows(task)
+            stable = same_page(previous, current)
+            if stable:
+                break
+            previous = current
         # Two independent upward resets also work when compression hides the thumb.
-        if reset >= 1 and same_page(previous, current):
+        if reset >= 1 and stable:
             break
     else:
         raise RuntimeError('索拉指南未确认列表顶部，未点击副本')
@@ -114,12 +155,10 @@ def _locate_book_target(task, serial, total, from_end=False):
             continue
         previous = current
         scroll(-2)
-        current = read_rows(task)
-        offset = overlap(previous, current)
+        current, offset = settled_overlap(previous)
         if offset is None:
             scroll(1)
-            current = read_rows(task)
-            offset = overlap(previous, current)
+            current, offset = settled_overlap(previous)
             if offset is None:
                 break
             stalled += 1

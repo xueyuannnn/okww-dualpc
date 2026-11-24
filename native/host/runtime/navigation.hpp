@@ -25,6 +25,10 @@ class Navigation {
     void confirmDialog(bool right = true);
     void exitRealm(double timeout = 120);
     Match openBook(const QString &feature = "gray_book_all_monsters", bool reuseExisting = true);
+    void ensureBookPage(const QString &feature, const QString &label,
+                        const std::function<bool()> &confirmed,
+                        const std::function<void()> &select = {},
+                        const std::function<void()> &failure = {});
     void bookCategory(const QString &category, double after = 2);
     TextLine selectMonster(const QString &name, int maxPages = 40);
     void teleportNearest();

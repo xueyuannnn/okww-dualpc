@@ -9,6 +9,13 @@ using namespace okww;
 class NativeTests : public QObject {
     Q_OBJECT
   private slots:
+    void dxgiWindowSelectionIsSharedByCaptureAndInput() {
+        auto config=Config::defaults();config.set("capture.source","desktop");config.set("capture.local_backend","DXGI");
+        const QJsonObject identity{{"kind","window"},{"hwnd","12345"},{"pid",987},
+            {"exe","C:/Games/Client-Win64-Shipping.exe"},{"title","test game"},{"class","UnrealWindow"}};
+        config.set("capture.local_target",identity);
+        QCOMPARE(desktopCaptureTarget(config),identity);
+    }
     void resumedTaskHeartbeatRecoversWithoutReplayingReleasedKeys() {
         Backend backend(false);backend.start(Config::defaults(),true);backend.arm(true);
         backend.nativeCommand({{"op","key"},{"code",4},{"down",true}});

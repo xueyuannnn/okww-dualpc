@@ -525,7 +525,7 @@ std::optional<int> Garden::weeklyProgress() {
         [&](rust::WorkflowOp op, const double *a, double *out) {
             switch (op) {
             case rust::WorkflowOp::ReadWeeklyHeading: {
-                heading = c_.text(.09, .08, .65, .18, .75);
+                heading = c_.text(.09, .08, .65, .18, c_.streamedImage() ? .65 : .75);
                 break;
             }
             case rust::WorkflowOp::IsWeeklyHeading: {

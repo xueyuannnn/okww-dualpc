@@ -936,7 +936,7 @@ void Engine::run(QString selected, uint64_t epoch, QJsonObject options) {
             // Explicit capture identity takes precedence over the foreground.
             // This selects recognition policy only; capture geometry is unchanged.
             auto target=config.get("capture.local_target").toObject();
-            if(config.s("capture.local_backend")!="WIN32" || target["kind"]!="window")
+            if(target["kind"]!="window")
                 target={};
             if(target.isEmpty() && config.b("kmbox.target_enabled"))
                 target=config.get("kmbox.target").toObject();

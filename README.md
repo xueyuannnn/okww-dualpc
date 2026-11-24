@@ -2,16 +2,16 @@
 
 鸣潮双机自动化工具，支持自动战斗、一键日常、声骸副本循环和角色代码工坊。
 
-双机模式通过采集卡读取画面、KMBox Net 发送键鼠操作；也可使用本机 DXGI / Win32 截图和 SendInput 输入。业务内核使用 Rust，负责内置任务、角色连招、识别策略和设备控制；C++ 保留 Qt 界面及底层 SDK 适配，工坊、通用脚本和活动流程使用独立 Python 环境。
+双机模式通过采集卡读取画面、KMBox Net 发送键鼠操作；也可使用本机 DXGI 截图和 SendInput 输入。业务内核使用 Rust，负责内置任务、角色连招、识别策略和设备控制；C++ 保留 Qt 界面及底层 SDK 适配，工坊、通用脚本和活动流程使用独立 Python 环境。
 
-基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.24**，支持 Windows 10／11 x64。
+基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.28**，支持 Windows 10／11 x64。
 
 ## 下载与安装
 
 | 下载 | 用途 |
 | --- | --- |
 | **[① 固定环境包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/environment-win10-11-x64-67a1e8aae098)** · 约 625 MB | 首次安装下载一次，包含运行库、Python 和识别模型 |
-| **[② beta.24 累计增量包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/v0.2.0-beta.24)** · 约 21 MB | 程序、脚本和界面资源；每个版本只需安装这一份 |
+| **[② beta.28 累计增量包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/v0.2.0-beta.28)** · 约 21 MB | 程序、脚本和界面资源；每个版本只需安装这一份 |
 | [其他版本](https://github.com/xueyuannnn/okww-dualpc/releases) · [使用说明](docs/usage.md) · [问题反馈](https://github.com/xueyuannnn/okww-dualpc/issues) | 源码和校验文件在对应版本的 Assets 中 |
 
 **首次安装**：下载①和②，将两个 ZIP 内的 `OKWW-DualPC-full` 文件夹合并解压到同一个位置，运行其中的 `OKWW-DualPC-Native-Dev.exe`，无需另装 Python。
@@ -24,7 +24,7 @@
 
 ## 主要功能
 
-- **采集与输入**：采集卡、DXGI、Win32 三种采集方式，KMBox Net、SendInput 两种输入方式。选中后展开对应设置，支持设备参数检测和鼠标移动测试。参数自动保存，连接时应用。
+- **采集与输入**：采集卡、DXGI 单机模式、DXGI 远程模式三种采集方式，KMBox Net、SendInput 两种输入方式。选中后展开对应设置，支持设备参数检测和鼠标移动测试。参数自动保存，连接时应用。
 - **自动战斗**：识别当前队伍，支持 58 名内置角色，按队伍选择内置连招或 Python 工坊连招。运行栏显示队伍、当前角色和代码模式。
 - **每日任务**：优先完成每日目标并领取奖励，再清理剩余体力、聚落和周常；缺少声骸时可先刷残像聚落。支持体力补充、任务重试与中断恢复。
 - **副本循环**：4C 声骸、无音区、凝素领域、模拟领域和高级技能材料。4C 可设置副本顺序、起始分类与位置、每个副本的轮数。
@@ -56,16 +56,16 @@
 | 模块 | 支持范围 |
 | --- | --- |
 | 系统 | Windows 10／11 x64；不支持 Windows 7／8.x |
-| 视频采集 | 采集卡（DirectShow、Media Foundation）、DXGI、Win32 |
+| 视频采集 | 采集卡（DirectShow、Media Foundation）、DXGI |
 | 键鼠输入 | KMBox Net、本机 SendInput |
 | 图像参数 | 按采集卡驱动枚举结果选择 |
 | 预览帧率 | 独立于采集帧率设置 |
 
 Win7 SP1 x64 兼容版正在准备，当前完整包仍不可用于 Win7；进度与功能范围见 [Windows 兼容维护](docs/windows-compatibility.md)。
 
-DXGI 和 Win32 默认采集主显示器，目标选择统一放在视频采集的高级设置中。采集帧率在外层选择或手动输入（1–1000），DXGI 也可跟随显示器刷新率。建议使用 16:9 游戏画面，有黑边时在高级设置中裁剪。
+DXGI 默认采集主显示器，可在视频采集的高级设置中选择显示器或窗口。窗口采集需保持可见、未遮挡，完整位于同一显示器内；改变窗口尺寸后重新连接。采集帧率可跟随显示器刷新率，也可选择或输入 1–1000。建议使用 16:9 游戏画面。
 
-「画面类型」默认自动区分本机游戏与远程客户端，也可手动选择。本机模式使用清晰画面参数，远程模式保留压缩容错；内置连招和 Python 工坊共用这项设置。
+在采集方式中直接选择「DXGI 单机模式」或「DXGI 远程模式」，启动时不再弹窗。单机模式使用清晰画面参数，远程模式保留压缩容错；内置连招和 Python 工坊共用这项设置。
 
 SendInput 默认向当前前台窗口发送输入，运行时将游戏或远程窗口放在前台即可；指定窗口放在高级设置中，选定后该窗口需保持前台。配合远程窗口使用时，输入能否传到游戏机由远程软件决定。程序权限需与目标一致，部分游戏可能不接收软件输入。KMBox Net 的设置与使用方式保持原样。采集卡仅支持 NV12，暂不支持 FFmpeg 采集。
 

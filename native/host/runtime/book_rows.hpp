@@ -7,6 +7,7 @@ struct BookRow {
     QString title;
 };
 QVector<BookRow> readBookRows(TaskContext &context);
-double bookRowSimilarity(const BookRow &left, const BookRow &right);
+double bookRowVisualSimilarity(const BookRow &left, const BookRow &right);
+double bookRowSimilarity(const BookRow &left, const BookRow &right, bool stationary = false);
 bool bookListAtTop(TaskContext &context, int total);
 } // namespace okww::runtime

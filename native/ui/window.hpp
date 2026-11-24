@@ -208,9 +208,8 @@ class Window final : public QMainWindow {
     QComboBox *codeSource_ = nullptr, *codeView_ = nullptr;
     QStackedWidget *boxForms_ = nullptr;
     QStackedWidget *captureForms_ = nullptr;
-    QComboBox *captureSource_ = nullptr, *localCaptureTarget_ = nullptr, *localCaptureFps_ = nullptr,
-              *dxgiMonitor_ = nullptr, *dxgiCaptureFps_ = nullptr, *localInputTarget_ = nullptr,
-              *recognitionMode_ = nullptr;
+    QComboBox *captureSource_ = nullptr, *localCaptureTarget_ = nullptr,
+              *dxgiMonitor_ = nullptr, *dxgiCaptureFps_ = nullptr, *localInputTarget_ = nullptr;
     QLabel *dxgiRefresh_ = nullptr;
     void scanDesktopTargets();
     QHash<QString, QWidget *> settings_;

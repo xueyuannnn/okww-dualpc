@@ -1,6 +1,31 @@
+import json
+from dataclasses import asdict
+
 import pytest
 
 from dualpc.settings import Settings
+
+
+@pytest.mark.parametrize('mode', ['auto', 'local', 'remote'])
+@pytest.mark.parametrize('backend', ['DXGI', 'WIN32'])
+def test_native_recognition_mode_loads_and_survives_python_save(tmp_path, mode, backend):
+    value = asdict(Settings())
+    value['capture'].update(source='desktop', local_backend=backend, recognition_mode=mode)
+    value['kmbox'].update(protocol='sendinput', dry_run=False)
+    path = tmp_path / 'dualpc.json'
+    path.write_text(json.dumps(value), encoding='utf-8')
+    loaded = Settings.load(path)
+    assert loaded.capture.recognition_mode == ('local' if mode == 'auto' else mode)
+    loaded.save(path)
+    assert json.loads(path.read_text('utf-8'))['capture']['recognition_mode'] == ('local' if mode == 'auto' else mode)
+
+
+def test_recognition_mode_has_only_explicit_choices_and_rejects_invalid_values():
+    settings = Settings().validate()
+    assert settings.capture.recognition_mode == 'local'
+    settings.capture.recognition_mode = 'not-a-mode'
+    with pytest.raises(ValueError, match='识别模式'):
+        settings.validate()
 
 
 @pytest.mark.parametrize('backend', ['DXGI', 'WIN32'])

@@ -774,11 +774,11 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
             break;
         }
         case rust::WorkflowOp::DailyOpenBossBook: {
-            navigation_.openBook("gray_book_boss", a[0] != 0);
+            navigation_.ensureBookPage("gray_book_boss","体力与副本页面",[&]{return resourceBookVisible(c_);});
             break;
         }
         case rust::WorkflowOp::DailyStaminaRetryInfo: {
-            if(c_.info) c_.info("读取体力",QString("计数尚未确认，重新打开索拉指南后重读（%1/2）").arg(int(a[0])));
+            if(c_.info) c_.info("读取体力",QString("计数尚未确认，复核页面并重读（%1/2）").arg(int(a[0])));
             break;
         }
         case rust::WorkflowOp::ReadDailyStamina: {

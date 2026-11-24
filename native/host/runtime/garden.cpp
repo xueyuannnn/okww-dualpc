@@ -650,7 +650,10 @@ void Garden::openWeekly() {
                 break;
             }
             case rust::WorkflowOp::OpenGardenWeeklyBook: {
-                navigation_.openBook("gray_book_quest");
+                navigation_.ensureBookPage("gray_book_quest","周度游历页面",[&]{return weeklyProgress().has_value();},[&] {
+                    auto tab=matchingText(c_.text(.10,.08,.65,.18,.65),"^(?:[周週]度[游遊][历歷]|[周週]常(?:[游遊][历歷]|任[务務])|Weekly\\s*(?:Activity|Exploration|Journey|Tasks?))$");
+                    if(tab)c_.click(*tab,.5);else c_.clickRelative(.343,.129,.5);
+                },[&]{weeklyFailure("未确认已进入周度游历或读到游历值，已保留页面与识别记录");});
                 break;
             }
             case rust::WorkflowOp::ReadGardenWeeklyProgress: {

@@ -277,11 +277,11 @@ struct DesktopDuplicationSdk {
             break;
         case rust::WorkflowOp::DesktopDupDuplicateOutput:
             hr(output1->DuplicateOutput(d.device.Get(), &d.output),
-               "DXGI 桌面复制不可用，请检查桌面会话或改用 Win32");
+               "DXGI 桌面复制不可用，请检查桌面会话与显示器后重新连接");
             break;
         case rust::WorkflowOp::DesktopDupFailure:
             if (a[0] == 0)
-                fail("DXGI 目标需完整位于同一显示器内，请移动窗口或选择 Win32 截图");
+                fail("DXGI 目标需完整位于同一显示器内，请移动窗口后重新连接");
             else
                 fail("目标窗口移出了 DXGI 显示器，请重新连接");
             break;
@@ -451,7 +451,13 @@ struct CaptureDesktopRunSdk {
             out[0] = c.config_.b("capture.dxgi_follow_refresh");
             break;
         case rust::WorkflowOp::DesktopRunDisplayRate:
-            c.negotiatedFps_ = displayRefreshRate(identity["id"].toString());
+            if(identity["kind"]=="window") {
+                RECT bounds{initial.left(),initial.top(),initial.right()+1,initial.bottom()+1};
+                MONITORINFOEXW monitor{};monitor.cbSize=sizeof(monitor);
+                if(!GetMonitorInfoW(MonitorFromRect(&bounds,MONITOR_DEFAULTTONEAREST),&monitor))
+                    fail("无法读取采集窗口所在显示器");
+                c.negotiatedFps_=displayRefreshRate(QString::fromWCharArray(monitor.szDevice));
+            } else c.negotiatedFps_ = displayRefreshRate(identity["id"].toString());
             break;
         case rust::WorkflowOp::DesktopRunConfiguredRate:
             c.negotiatedFps_ = c.config_.d("capture.local_fps");

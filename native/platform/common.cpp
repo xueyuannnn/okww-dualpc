@@ -302,6 +302,7 @@ Config Config::defaults() {
                                      {"backend", "DSHOW"},
                                      {"source", "card"},
                                      {"local_backend", "DXGI"},
+                                     {"recognition_mode", "local"},
                                      {"dxgi_monitor", ""},
                                      {"dxgi_follow_refresh", true},
                                      {"local_target", QJsonObject{}},

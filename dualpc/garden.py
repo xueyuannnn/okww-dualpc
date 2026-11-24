@@ -7,6 +7,7 @@ import time
 import cv2
 import numpy as np
 from ok import Box
+from ok.util.image_io import imread
 
 TITLE = re.compile(r"本[周週][游遊][园園]")
 STAGE = re.compile(r"[阶階]段\s*[:：]?\s*\d\s*/\s*7")
@@ -81,7 +82,7 @@ def use_garden_blessing(task, already_open=False):
 @lru_cache(maxsize=1)
 def recommendation_template():
     path = Path(__file__).resolve().parents[1] / 'assets/dualpc/garden_recommended.png'
-    template = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    template = imread(path, cv2.IMREAD_GRAYSCALE)
     # Exclude the card/background and selected outline surrounding the badge.
     return template[6:42, 6:41] if template is not None else None
 

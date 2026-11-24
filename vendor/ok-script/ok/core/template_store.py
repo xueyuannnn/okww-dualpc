@@ -7,6 +7,7 @@ import os
 import tempfile
 import threading
 from pathlib import Path
+from ok.util.image_io import imread, imwrite
 
 
 TEMPLATE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
@@ -78,8 +79,7 @@ class CocoTemplateStore:
         return max((int(item.get("id", 0)) for item in items), default=0) + 1
 
     def _dimensions(self, path):
-        import cv2
-        frame = cv2.imread(str(path))
+        frame = imread(path)
         if frame is None:
             return 0, 0
         height, width = frame.shape[:2]
@@ -218,10 +218,9 @@ class CocoTemplateStore:
             return f"{index}.png"
 
     def save_frame(self, frame):
-        import cv2
         with self._lock:
             path = self.image_path(self.next_image_name())
-            if not cv2.imwrite(str(path), frame):
+            if not imwrite(path, frame):
                 raise RuntimeError("Failed to save template image")
             data = self.load()
             self.ensure_image(data, path)

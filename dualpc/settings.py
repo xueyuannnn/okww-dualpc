@@ -23,6 +23,7 @@ class CaptureSettings:
     ffmpeg_path: str = "ffmpeg"
     source: str = "card"
     local_backend: str = "DXGI"
+    recognition_mode: str = "local"
     dxgi_monitor: str = ""
     dxgi_follow_refresh: bool = True
     local_target: dict = field(default_factory=dict)
@@ -62,6 +63,8 @@ class Settings:
         local = c.source == 'desktop'
         if c.source not in {"card", "desktop"}:
             raise ValueError("请选择采集方式")
+        if c.recognition_mode not in {'local', 'remote'}:
+            raise ValueError('请选择单机游戏或远程画面识别模式')
         if c.source == "desktop":
             if c.local_backend not in {"DXGI", "WIN32"} or not isinstance(c.local_fps, int) or not 1 <= c.local_fps <= 1000:
                 raise ValueError("请选择本机截图方式，采集帧率需为 1–1000 的整数")
@@ -124,6 +127,8 @@ class Settings:
             box.pop(key, None)
         capture = dict(data.get("capture", {}))
         capture.pop("auto_game_region", None)
+        if capture.get('recognition_mode') in {None, '', 'auto'}:
+            capture['recognition_mode'] = 'local'
         return cls(CaptureSettings(**capture), BoxSettings(**box),
                    data.get("game_language", "zh_CN")).validate()
 

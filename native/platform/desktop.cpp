@@ -526,6 +526,10 @@ struct DesktopCaptureTargetSdk {
     }
 };
 QJsonObject desktopCaptureTarget(const Config &config) {
+    // Both capture and SendInput resolve this identity, so a window's client
+    // rectangle is also the input coordinate origin.
+    const auto selected=config.get("capture.local_target").toObject();
+    if(config.s("capture.local_backend")=="DXGI" && !selected.isEmpty())return selected;
     DesktopCaptureTargetSdk sdk{config};
     rust::platformWorkflowRun(rust::WorkflowMethod::DesktopCaptureTarget, {}, sdk);
     return sdk.value;

@@ -1,18 +1,5 @@
 //! Original USB-HID physical-position mapping and desktop normalization.
 
-// Unknown applications keep the last established image type. In particular,
-// opening our settings must not turn a remote session into local game capture.
-pub fn recognition_kind(executable: &[u8]) -> i32 {
-    let name = String::from_utf8_lossy(executable).replace('\\', "/");
-    let name = name.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
-    match name.as_str() {
-        "client-win64-shipping.exe" => 1,
-        "gameviewer.exe" | "moonlight.exe" | "parsec.exe" | "mstsc.exe" | "sunloginclient.exe"
-        | "todesk.exe" | "anydesk.exe" | "teamviewer.exe" => 2,
-        _ => 0,
-    }
-}
-
 const CODES: &[(i32, u32)] = &[
     (4, 0x1e),
     (5, 0x30),
@@ -138,24 +125,4 @@ pub fn absolute(point: [i32; 2], bounds: [i32; 4], contains: bool) -> Option<[i3
         (f64::from(point[1].wrapping_sub(top)) * 65535. / f64::from(height.wrapping_sub(1))).round()
             as i64 as i32,
     ])
-}
-
-#[cfg(test)]
-mod recognition_tests {
-    use super::*;
-    #[test]
-    fn local_game_and_remote_clients_are_distinct() {
-        assert_eq!(recognition_kind(br"D:\Game\Client-Win64-Shipping.EXE"), 1);
-        for name in ["GameViewer.exe", "Moonlight.exe", "mstsc.exe", "parsec.exe"] {
-            assert_eq!(recognition_kind(name.as_bytes()), 2);
-        }
-        for name in [
-            "OKWW-DualPC-Native-Dev.exe",
-            "",
-            "launcher.exe",
-            "notepad.exe",
-        ] {
-            assert_eq!(recognition_kind(name.as_bytes()), 0);
-        }
-    }
 }

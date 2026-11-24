@@ -68,6 +68,7 @@ struct NavigationBridge {
     QVector<TextLine> lines;
     QVector<Match> rows;
     QVector<BookRow> bookRows, previousBookRows;
+    QJsonArray bookObservations;
     QVector<Match> waypoints;
     QString key(int index) {
         const QStringList names{"esc", "alt", "ctrl", "a", "backspace"};
@@ -477,6 +478,11 @@ struct NavigationBridge {
                     bookRows=readBookRows(c);
                     rows.clear();
                     for(const auto &row:bookRows)rows.append(row.button);
+                    QJsonArray observation;
+                    for(const auto &row:bookRows)observation.append(QJsonObject{{"title",row.title},
+                        {"y",row.button.center().y()/c.frame.rows},{"confidence",row.button.confidence}});
+                    bookObservations.append(observation);
+                    if(bookObservations.size()>12)bookObservations.removeFirst();
                     out[0] = double(rows.size());
                     break;
                 }
@@ -487,15 +493,28 @@ struct NavigationBridge {
                     previousBookRows=bookRows;
                     break;
                 case rust::WorkflowOp::CompareBookRows:
-                    out[0]=bookRowSimilarity(previousBookRows.at(int(a[0])),bookRows.at(int(a[1])));
+                    out[0]=bookRowSimilarity(previousBookRows.at(int(a[0])),bookRows.at(int(a[1])),a[2]!=0);
                     out[1]=(previousBookRows.at(int(a[0])).button.center().y()-bookRows.at(int(a[1])).button.center().y())/c.frame.rows;
+                    out[2]=previousBookRows.at(int(a[0])).title.isEmpty() && bookRows.at(int(a[1])).title.isEmpty() &&
+                        previousBookRows.at(int(a[0])).button.center().y()<c.frame.rows*.28 &&
+                        bookRows.at(int(a[1])).button.center().y()<c.frame.rows*.28;
                     break;
                 case rust::WorkflowOp::BookSelectionFailure: {
                     QJsonArray observed;
                     for(const auto &row:bookRows)observed.append(QJsonObject{{"title",row.title},
                         {"button",QJsonArray{row.button.box.x(),row.button.box.y(),row.button.box.width(),row.button.box.height()}}});
+                    QJsonArray comparisons;
+                    for(const auto &previousRow:previousBookRows) {
+                        QJsonArray scores;
+                        for(const auto &row:bookRows)scores.append(QJsonObject{
+                            {"visual",bookRowVisualSimilarity(previousRow,row)},
+                            {"identity",bookRowSimilarity(previousRow,row)}});
+                        comparisons.append(scores);
+                    }
+                    const QString reason=int(a[2])==0 ? "列表复位后未稳定" : int(a[2])==2 ? "滚动前后未确认重叠行" : "目标行未稳定";
                     if(c.diagnostic)c.diagnostic("索拉指南选行未确认",{{"requested_index",a[0]},
-                        {"total",a[1]},{"rows",observed},{"reason",a[2]}});
+                        {"total",a[1]},{"rows",observed},{"reason",a[2]},
+                        {"reason_text",reason},{"observations",bookObservations},{"comparisons",comparisons}});
                     throw NavigationFailure("索拉指南目标行未确认，已保留当前页面与选行记录");
                 }
                 case rust::WorkflowOp::LastRowAbove: {
@@ -614,6 +633,31 @@ void Navigation::exitRealm(double timeout) {
 void Navigation::ensureMain(double timeout, bool back, bool allowBook) {
     NavigationBridge b{c_};
     b.run(rust::WorkflowMethod::EnsureMain, {timeout, double(back), double(allowBook)});
+}
+void Navigation::ensureBookPage(const QString &feature, const QString &label,
+                                const std::function<bool()> &confirmed,
+                                const std::function<void()> &select,
+                                const std::function<void()> &failure) {
+    rust::workflowRun(rust::WorkflowMethod::VerifiedBookPage,{},[&](rust::WorkflowOp op,const double *a,double *out) {
+        switch(op) {
+        case rust::WorkflowOp::Refresh:c_.refresh();break;
+        case rust::WorkflowOp::Checkpoint:c_.execution.checkpoint();break;
+        case rust::WorkflowOp::Now:out[0]=c_.execution.now();break;
+        case rust::WorkflowOp::ExecutionWait:c_.execution.wait(a[0]);break;
+        case rust::WorkflowOp::Sleep:c_.sleep(a[0]);break;
+        case rust::WorkflowOp::GuidePageMatches:out[0]=confirmed();break;
+        case rust::WorkflowOp::GuidePageOpen:openBook(feature,true);break;
+        case rust::WorkflowOp::GuidePageSelect:if(select)select();break;
+        case rust::WorkflowOp::GuidePageRetryInfo:
+            if(c_.info)c_.info("页面切换",QString("等待%1未完成，重新选择标签（%2/2）").arg(label).arg(int(a[0])));
+            break;
+        case rust::WorkflowOp::GuidePageFailure:
+            if(failure)failure();
+            if(c_.diagnostic)c_.diagnostic("指南页面未切换",{{"expected_page",label},{"tab",feature},{"attempts",3}});
+            throw NavigationFailure("未确认已进入"+label+"，已保留当前页面与识别记录");
+        default:fail("Rust 指南页面确认宿主无效");
+        }
+    });
 }
 Match Navigation::openBook(const QString &feature, bool reuseExisting) {
     NavigationBridge b{c_};

@@ -1,6 +1,5 @@
 #include "task.hpp"
 #include "task_abi.hpp"
-#include "desktop_input_abi.hpp"
 #include <opencv2/imgproc.hpp>
 namespace okww::runtime {
 void TaskContext::beginWorkflow(QJsonArray steps, QString timingPath) {
@@ -20,13 +19,9 @@ TaskContext::TaskContext(Execution &e, Input &i, Templates &t, Profile &p, Frame
       profile(p) {}
 void TaskContext::observeDesktopImage(const QJsonObject &environment) {
     if (!streamedCapture) return;
-    const auto executable=environment.value("exe").toString(environment.value("executable").toString()).toUtf8();
-    const int kind=rust::okww_rs_desktop_recognition(reinterpret_cast<const uint8_t *>(executable.constData()),size_t(executable.size()));
     const bool previous=localDesktopGame;
-    if(desktopRecognitionMode=="local")localDesktopGame=true;
-    else if(desktopRecognitionMode=="remote")localDesktopGame=false;
-    else if(kind!=0)localDesktopGame=kind==1;
-    if(kind!=0 || !environment.isEmpty())recognitionEnvironment=environment;
+    localDesktopGame=desktopRecognitionMode!="remote";
+    if(!environment.isEmpty())recognitionEnvironment=environment;
     if(previous!=localDesktopGame) {
         remotePartyVersion_=UINT64_MAX;
         knownRemotePartySize_=0;lastRemotePartySeen_=-1;

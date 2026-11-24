@@ -17,6 +17,7 @@ from ok.feature.Box import Box, sort_boxes
 from ok.feature.Feature import Feature
 from ok.core.events import communicate
 from ok.util.file import get_path_relative_to_exe
+from ok.util.image_io import imread, imwrite
 from ok.util.logger import Logger
 
 
@@ -199,7 +200,7 @@ class FeatureSet:
             file_name = f"{category_name}.jpg"
             file_path = os.path.join(target_folder, file_name)
 
-            cv2.imwrite(file_path, image.mat)
+            imwrite(file_path, image.mat)
 
     def get_feature_by_name(self, mat, name):
         if mat is None:
@@ -454,7 +455,7 @@ def read_from_json(coco_json, width=-1, height=-1, hcenter_features=None, vcente
         if ok_compressed is None:
             with Image.open(image_path) as img:
                 ok_compressed = 'ok_compressed' in img.info.keys()
-        whole_image = cv2.imread(image_path)
+        whole_image = imread(image_path)
         if whole_image is None:
             logger.error(f'Could not read image {image_path}')
             raise ValueError(f'Could not read image {image_path}')
@@ -748,7 +749,7 @@ def compress_coco(coco_json) -> None:
         h = img_info.get('height')
         
         if w is None or h is None:
-            tmp_img = cv2.imread(img_path)
+            tmp_img = imread(img_path)
             if tmp_img is not None:
                 h, w = tmp_img.shape[:2]
                 img_info['width'] = w
@@ -805,7 +806,7 @@ def compress_coco(coco_json) -> None:
             for img_id in page['image_ids']:
                 img_info = image_info_map[img_id]
                 src_path = os.path.join(coco_folder, img_info['file_name'])
-                src_img = cv2.imread(src_path)
+                src_img = imread(src_path)
 
                 if src_img is None:
                     continue

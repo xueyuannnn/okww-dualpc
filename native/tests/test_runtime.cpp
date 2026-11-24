@@ -188,7 +188,7 @@ class RuntimeTests : public QObject {
         c.streamedCapture=true;QVERIFY(vision.healthBar(true));
         profile.set("Cloud Game","Compressed Image Tolerance",false);QVERIFY(!vision.healthBar(true));
     }
-    void desktopRecognitionKeepsLocalRemoteAndUnknownWindowsSeparate() {
+    void desktopRecognitionUsesExplicitModesInsteadOfForegroundProcesses() {
         Harness h;QTemporaryDir data;const auto root=QString(OKWW_SOURCE_ROOT);
         Templates templates(root+"/assets/coco_annotations.json");
         Profile profile(data.path(),root+"/native/resources/catalog.json");
@@ -201,7 +201,7 @@ class RuntimeTests : public QObject {
         c.observeDesktopImage({{"executable","OKWW-DualPC-Native-Dev.exe"},{"own_window",true}});
         QVERIFY(c.localDesktopGame); // Settings must not change the established source.
         c.observeDesktopImage({{"exe","C:/Remote/Moonlight.exe"}});
-        QVERIFY(!c.localDesktopGame);QVERIFY(c.streamedImage());
+        QVERIFY(c.localDesktopGame);QVERIFY(!c.streamedImage());
         c.desktopRecognitionMode="local";
         c.observeDesktopImage({{"executable","GameViewer.exe"}});
         QVERIFY(c.localDesktopGame);QVERIFY(!c.streamedImage());
@@ -532,6 +532,45 @@ class RuntimeTests : public QObject {
         QCOMPARE(recovered.size(), expected.size());
         for (int i = 0; i < recovered.size(); ++i)
             QCOMPARE(recovered[i].text, expected[i].text);
+    }
+    void cancelledOcrCanSwitchInputShapesBetweenTasks() {
+        try {
+        const QString root=OKWW_SOURCE_ROOT;
+        auto models=root+"/assets/ocr/ppocrv5";
+        if(!QFile::exists(models+"/det/det.onnx"))models=root+"/.venv/Lib/site-packages/onnxocr/models/ppocrv5";
+        if(!QFile::exists(models+"/det/det.onnx"))QSKIP("OCR models absent");
+        Ocr ocr(models);
+        const auto reference=readImage(root+"/assets/images/38.png");
+        cv::Mat large,small;
+        cv::resize(reference,large,{960,768});
+        cv::resize(reference,small,{832,288});
+        const auto expected=ocr.read(small);
+        for(int round=0;round<10;++round) {
+            int calls=0;
+            QVERIFY_EXCEPTION_THROWN(ocr.read(large,{},.5,true,false,[&]{
+                if(++calls>=3)throw Cancelled();
+            }),Cancelled);
+            const auto recovered=ocr.read(small,{},.5,true,false,[]{});
+            QCOMPARE(recovered.size(),expected.size());
+            for(int i=0;i<expected.size();++i)QCOMPARE(recovered[i].text,expected[i].text);
+        }
+        } catch(const std::exception &error) { QFAIL(error.what()); }
+    }
+    void ocrCanSwitchInputShapesWithoutCancellation() {
+        try {
+            const QString root=OKWW_SOURCE_ROOT;
+            auto models=root+"/assets/ocr/ppocrv5";
+            if(!QFile::exists(models+"/det/det.onnx"))models=root+"/.venv/Lib/site-packages/onnxocr/models/ppocrv5";
+            if(!QFile::exists(models+"/det/det.onnx"))QSKIP("OCR models absent");
+            Ocr ocr(models);const auto source=readImage(root+"/assets/images/38.png");
+            cv::Mat large,small;cv::resize(source,large,{960,768});cv::resize(source,small,{832,288});
+            const auto expected=ocr.read(small);
+            for(int round=0;round<5;++round) {
+                ocr.read(large,{},.5,true,false,[]{});
+                const auto actual=ocr.read(small,{},.5,true,false,[]{});
+                QCOMPARE(actual.size(),expected.size());
+            }
+        } catch(const std::exception &error) { QFAIL(error.what()); }
     }
     void movementWaitsOnlyBetweenReportsAndKeepsTheSameDisplacement() {
         Harness h;

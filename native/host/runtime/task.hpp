@@ -44,7 +44,7 @@ class TaskContext {
     QString gameLanguage = "zh_CN";
     bool streamedCapture = false;
     bool localDesktopGame = false;
-    QString desktopRecognitionMode = "auto";
+    QString desktopRecognitionMode = "local";
     QJsonObject recognitionEnvironment;
     std::function<QJsonObject()> desktopEnvironment;
     void observeDesktopImage(const QJsonObject &environment);
