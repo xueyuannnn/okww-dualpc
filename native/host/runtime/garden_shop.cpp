@@ -248,7 +248,7 @@ int Garden::shop() {
                 break;
             }
             case rust::WorkflowOp::FindGardenShopClose: {
-                close = c_.find("garden_shop_close", {.threshold = a[0]});
+                close = findControl("garden_shop_close", {.threshold = a[0]});
                 out[0] = close.has_value();
                 break;
             }

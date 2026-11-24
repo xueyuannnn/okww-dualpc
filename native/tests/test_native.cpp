@@ -239,6 +239,64 @@ class NativeTests : public QObject {
         QVERIFY(controller.state()["keys"].toArray().isEmpty());
         QCOMPARE(controller.state()["modifiers"].toInt(),0);
     }
+    void localDxgiWaitsForGameForegroundAndAllowsFocusReturn() {
+        auto config = Config::defaults();
+        config.set("capture.source", "desktop");
+        config.set("capture.local_backend", "DXGI");
+        config.set("capture.recognition_mode", "local");
+        config.set("kmbox.protocol", "sendinput");
+        config.set("kmbox.dry_run", true);
+        QJsonObject environment{{"executable", "ChatGPT.exe"}, {"class", "Chrome_WidgetWin_1"},
+                                {"title", "ChatGPT"}};
+        Controller controller(config, [&] { return environment; });
+        controller.connect();
+        QVERIFY_THROWS_EXCEPTION(LocalInputBlocked, controller.key(59, true));
+        QVERIFY(controller.history().isEmpty());
+
+        environment = {{"executable", "Client-Win64-Shipping.exe"}, {"class", "UnrealWindow"},
+                       {"title", "鸣潮  "}};
+        controller.key(59, true);
+        QCOMPARE(controller.history().size(), 1);
+        INPUT pressed{};
+        std::memcpy(&pressed, controller.history().last().constData(), sizeof pressed);
+        QCOMPARE(pressed.ki.wVk, WORD(VK_F2));
+        QVERIFY(!(pressed.ki.dwFlags & KEYEVENTF_SCANCODE));
+        environment = {{"executable", "ChatGPT.exe"}, {"class", "Chrome_WidgetWin_1"}, {"title", "ChatGPT"}};
+        controller.key(59, false);
+        QCOMPARE(controller.history().size(), 2);
+        INPUT released{};
+        std::memcpy(&released, controller.history().last().constData(), sizeof released);
+        QCOMPARE(released.ki.wVk, WORD(VK_F2));
+        QVERIFY(released.ki.dwFlags & KEYEVENTF_KEYUP);
+        QVERIFY_THROWS_EXCEPTION(LocalInputBlocked, controller.button("left", true));
+        QCOMPARE(controller.history().size(), 2);
+        QVERIFY(controller.state()["keys"].toArray().isEmpty());
+    }
+    void localDxgiPermitsOnlyTheRecognizedLauncherEntryClick() {
+        auto config = Config::defaults();
+        config.set("capture.source", "desktop");
+        config.set("capture.local_backend", "DXGI");
+        config.set("capture.recognition_mode", "local");
+        config.set("kmbox.protocol", "sendinput");
+        config.set("kmbox.dry_run", true);
+        QJsonObject environment{{"executable", "launcher_main.exe"}, {"class", "HwndWrapper[launcher_main;;fixture]"},
+                                {"title", "鸣潮"}, {"hwnd", "512"}};
+        Controller controller(config, [&] { return environment; });
+        controller.connect();
+        QVERIFY_THROWS_EXCEPTION(LocalInputBlocked, controller.button("left", true));
+        QVERIFY_THROWS_EXCEPTION(LocalInputBlocked, controller.button("left", true, "513"));
+        QVERIFY_THROWS_EXCEPTION(LocalInputBlocked, controller.key(59, true));
+        QVERIFY(controller.history().isEmpty());
+        controller.button("left", true, "512");
+        QCOMPARE(controller.history().size(), 1);
+        environment["hwnd"] = "513";
+        controller.button("left", false, "512");
+        QVERIFY_THROWS_EXCEPTION(LocalInputBlocked, controller.button("left", true, "512"));
+        environment["hwnd"] = "512";
+        environment["executable"] = "ChatGPT.exe";
+        QVERIFY_THROWS_EXCEPTION(LocalInputBlocked, controller.button("left", true, "512"));
+        QCOMPARE(controller.history().size(), 2);
+    }
     void unchangedDesktopPollsKeepLivenessWithoutInventingFrames() {
         auto config = Config::defaults();
         config.set("capture.source", "desktop");

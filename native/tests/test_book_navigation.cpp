@@ -97,6 +97,9 @@ class BookNavigationTests final : public QObject {
         Input input(config,size,true,[&](QJsonObject q){
             if(q["op"]=="absolute")mouse={q["x"].toInt(),q["y"].toInt()};
             if(q["op"]=="wheel") {
+                // The rewards strip consumes the wheel; only the name column scrolls the list here.
+                if(mouse.x() < size.width()*.46 || mouse.x() > size.width()*.61)
+                    return QJsonObject{};
                 const int steps=q["steps"].toInt();
                 if(steps>0){++upward;offset=0.;scrolledAt=clock.time;}
                 else offset=std::min(height*2.362,offset-steps*height*.045);

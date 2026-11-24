@@ -4,6 +4,8 @@
 #include "book_rows.hpp"
 namespace okww::runtime {
 namespace {
+const QStringList guideTabs{"gray_book_quest", "gray_book_boss", "gray_book_weekly", "gray_book_all_monsters"};
+
 [[noreturn]] void navigationError(int reason, const QString &name = {}) {
     switch (reason) {
     case 0:
@@ -44,6 +46,8 @@ namespace {
         throw NavigationFailure("滚动后未找到图鉴前往按钮");
     case 20:
         throw NavigationFailure("前往副本后未识别到目标界面");
+    case 21:
+        throw NavigationFailure("仍在队伍界面，未打开索拉指南。请先在游戏内确认可以用指南快捷键打开");
     case 7:
         throw NavigationFailure("敌迹探寻列表中找不到 " + name + "，请确认已解锁及游戏语言");
     case 8:
@@ -70,11 +74,90 @@ struct NavigationBridge {
     QVector<BookRow> bookRows, previousBookRows;
     QJsonArray bookObservations;
     QVector<Match> waypoints;
+    QMap<QString, std::optional<Match>> guideMarkers;
+    uint64_t guideFrameVersion = 0;
+    QJsonObject guideProbe;
+    std::optional<bool> lastGuideVisible;
+    int guideKeyAttempts = 0;
+
+    QRect guideSidebar() const {
+        return c.templates.box("box_gray_book", {c.frame.cols, c.frame.rows});
+    }
+    std::optional<Match> guideMarker(const QString &feature) {
+        if (guideFrameVersion != c.frameVersion) {
+            guideMarkers.clear();
+            guideFrameVersion = c.frameVersion;
+        }
+        if (const auto it = guideMarkers.constFind(feature); it != guideMarkers.cend())
+            return it.value();
+
+        const auto box = c.templates.box(feature, {c.frame.cols, c.frame.rows});
+        const auto area = box.adjusted(-box.width() / 2, -box.height() * 2 / 3,
+                                       box.width() / 2, box.height() * 2 / 3) & guideSidebar();
+        QStringList variants{feature};
+        if (feature == "gray_book_boss")
+            variants << "gray_book_boss_highlight";
+        std::optional<Match> match;
+        for (const auto &variant : variants) {
+            for (const auto scale : {1., .9, 1.1, .8, 1.2, .72, 1.3}) {
+                const auto candidate = c.find(variant, {.threshold = .76, .search = area,
+                    .grayscale = true, .templateScale = scale, .blurSigma = .5});
+                if (candidate && (!match || candidate->confidence > match->confidence))
+                    match = candidate;
+                if (match && match->confidence >= .95)
+                    break;
+            }
+        }
+        guideMarkers.insert(feature, match);
+        return match;
+    }
+    bool bookVisible() {
+        const bool teamVisible = c.inTeam();
+        const bool local = c.streamedCapture && c.localDesktopGame;
+        if (teamVisible && !local)
+            return false;
+        if (!teamVisible && c.findAny(guideTabs, {.threshold = .75, .search = guideSidebar(), .grayscale = true}))
+            return true;
+        if (!c.streamedCapture)
+            return false;
+        int markers = 0;
+        for (const auto &feature : guideTabs) {
+            const auto marker = guideMarker(feature);
+            if (marker && (!teamVisible || marker->confidence >= .85) && ++markers >= 2)
+                return true;
+        }
+        return false;
+    }
+    std::optional<Match> findBookTab(double threshold) {
+        auto match = c.find(name, {.threshold = threshold, .search = guideSidebar(), .grayscale = true});
+        const bool teamVisible = c.streamedCapture && c.localDesktopGame && c.inTeam();
+        guideProbe = {{"frame_width", c.frame.cols}, {"frame_height", c.frame.rows},
+                      {"standard_match", bool(match)}, {"team_hud_visible", teamVisible}};
+        if ((match && !teamVisible) || !c.streamedCapture || !guideTabs.contains(name))
+            return match;
+
+        match = guideMarker(name);
+        guideProbe.insert("scaled_match", bool(match));
+        if (match && (!teamVisible || match->confidence >= .85)) {
+            guideProbe.insert("scaled_score", match->confidence);
+            for (const auto &feature : guideTabs) {
+                if (feature == name)
+                    continue;
+                const auto peer = guideMarker(feature);
+                if (peer && (!teamVisible || peer->confidence >= .85)) {
+                    guideProbe.insert("other_marker", feature);
+                    return match;
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
     QString key(int index) {
-        const QStringList names{"esc", "alt", "ctrl", "a", "backspace"};
+        const QStringList keys{"esc", "alt", "ctrl", "a", "backspace"};
         if (index == 5)
             return c.hotkey("Guidebook Key", c.hotkey("索拉指南", "f2"));
-        return names.at(index);
+        return keys.at(index);
     }
     std::array<double, 3> run(rust::WorkflowMethod method, std::initializer_list<double> args = {}) {
         return rust::workflowRun(
@@ -114,6 +197,9 @@ struct NavigationBridge {
                     break;
                 case rust::WorkflowOp::DesktopCapture:
                     out[0] = c.streamedCapture;
+                    break;
+                case rust::WorkflowOp::LocalDesktopGuide:
+                    out[0] = c.streamedCapture && c.localDesktopGame;
                     break;
                 case rust::WorkflowOp::RetryingStep: {
                     out[0] = c.state->retryingStep;
@@ -174,7 +260,11 @@ struct NavigationBridge {
                     break;
                 }
                 case rust::WorkflowOp::Key: {
-                    c.key(key(int(a[0])), a[1]);
+                    const auto index = int(a[0]);
+                    const bool localGuideKey = index == 5 && c.streamedCapture && c.localDesktopGame;
+                    if (index == 5)
+                        ++guideKeyAttempts;
+                    c.key(key(index), a[1], localGuideKey ? .12 : .02);
                     break;
                 }
                 case rust::WorkflowOp::KeyDown: {
@@ -245,15 +335,11 @@ struct NavigationBridge {
                     break;
                 }
                 case rust::WorkflowOp::BookVisible:
-                    out[0] = !c.inTeam() && c.findAny({"gray_book_quest", "gray_book_boss",
-                        "gray_book_weekly", "gray_book_all_monsters"}, {.threshold=.75,
-                        .search=c.templates.box("box_gray_book",{c.frame.cols,c.frame.rows}),.grayscale=true}).has_value();
+                    lastGuideVisible = bookVisible();
+                    out[0] = *lastGuideVisible;
                     break;
                 case rust::WorkflowOp::FindBookTab: {
-                    tab = c.find(name,
-                                 {.threshold = a[0],
-                                  .search = c.templates.box("box_gray_book", {c.frame.cols, c.frame.rows}),
-                                  .grayscale = true});
+                    tab = findBookTab(a[0]);
                     out[0] = tab.has_value();
                     break;
                 }
@@ -662,7 +748,20 @@ void Navigation::ensureBookPage(const QString &feature, const QString &label,
 Match Navigation::openBook(const QString &feature, bool reuseExisting) {
     NavigationBridge b{c_};
     b.name = feature;
-    b.run(rust::WorkflowMethod::OpenBook, {double(reuseExisting)});
+    try {
+        b.run(rust::WorkflowMethod::OpenBook, {double(reuseExisting)});
+    } catch (const NavigationFailure &error) {
+        if (c_.diagnostic) {
+            QJsonObject details{{"tab", feature}, {"guide_hotkey", b.key(5)},
+                {"hotkey_attempts", b.guideKeyAttempts}, {"desktop_capture", c_.streamedCapture},
+                {"party_observation", c_.partyObservation}, {"tab_observation", b.guideProbe},
+                {"navigation_error", QString::fromUtf8(error.what())}};
+            if (b.lastGuideVisible)
+                details.insert("last_guide_visible", *b.lastGuideVisible);
+            c_.diagnostic("索拉指南导航失败", details);
+        }
+        throw;
+    }
     return *b.tab;
 }
 TextLine Navigation::selectMonster(const QString &name, int maxPages) {

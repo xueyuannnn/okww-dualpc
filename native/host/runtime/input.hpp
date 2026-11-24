@@ -15,6 +15,7 @@ class Input {
     std::optional<QPointF> position_;
     bool absolute_;
     double positionReadyAt_ = -1;
+    QString gameEntryWindow_;
     friend struct InputContractAccess;
     struct RustRequest {
         QJsonObject command;
@@ -44,7 +45,7 @@ class Input {
     void buttonDown(QString button = "left");
     void buttonUp(QString button = "left");
     void click(std::optional<QPointF> point = {}, double seconds = .05, QString button = "left");
-    void taskClick(QPointF point) { click(point, config_.d("kmbox.ui_click_hold")); }
+    void taskClick(QPointF point, const QString &gameEntryWindow = {});
     void move(QPointF point);
     void relative(double x, double y);
     void scroll(int steps, std::optional<QPointF> point = {});

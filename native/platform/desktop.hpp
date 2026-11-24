@@ -27,6 +27,7 @@ QPoint desktopAbsolute(QPoint point, QRect virtualDesktop);
 QRect virtualDesktopRect();
 INPUT hidInput(int usage, bool down);
 QJsonObject localInputEnvironment();
+bool isGameLauncher(const QJsonObject &environment);
 // Diagnostic captions must never wait for another thread in this process.
 QString desktopWindowCaption(HWND window);
 inline constexpr ULONG_PTR localInputTag = 0x4F4B5757;

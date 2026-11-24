@@ -1,5 +1,6 @@
 #include "task.hpp"
 #include "task_abi.hpp"
+#include "desktop.hpp"
 #include <opencv2/imgproc.hpp>
 
 namespace okww::runtime {
@@ -196,6 +197,20 @@ std::array<double, 3> TaskContext::rustRun(int method, std::initializer_list<dou
                 case rust::TaskOp::ClickText:
                     c.click(context.texts.at(size_t(a[0])).value(), a[1]);
                     break;
+                case rust::TaskOp::ClickGameEntry: {
+                    QString launcherWindow;
+                    if (c.streamedCapture && c.localDesktopGame) {
+                        auto environment = c.recognitionEnvironment;
+                        // The capture identity may still be cached from before the launcher came forward.
+                        if (!isGameLauncher(environment) && c.desktopEnvironment)
+                            environment = localInputEnvironment();
+                        if (isGameLauncher(environment))
+                            launcherWindow = environment["hwnd"].toString();
+                    }
+                    c.input.taskClick(context.texts.at(size_t(a[0])).value().center(), launcherWindow);
+                    c.sleep(a[1]);
+                    break;
+                }
                 case rust::TaskOp::ClickPoint:
                     c.click(gamePoint({c.frame.cols, c.frame.rows}, a[0], a[1], a[3] != 0, a[4] != 0), a[2]);
                     break;

@@ -1,6 +1,6 @@
 use super::*;
 
-fn remote_hud(mask: u8, known_size: f64) -> [f64; 3] {
+fn party_from_markers(mask: u8, known_size: f64) -> [f64; 3] {
     let found = mask.count_ones();
     if found == 2 {
         let current = (0..3).find(|i| mask & (1 << i) == 0).unwrap_or(0);
@@ -21,6 +21,18 @@ fn remote_hud(mask: u8, known_size: f64) -> [f64; 3] {
 }
 
 impl Host {
+    pub(super) fn local_party(&self) -> Result<[f64; 3]> {
+        let mut mask = 0;
+        for index in 0..3 {
+            if self.flag(Op::PartyProbe, &[f64::from(index), 0.])?
+                || self.flag(Op::PartyProbe, &[f64::from(index), 1.])?
+            {
+                mask |= 1 << index;
+            }
+        }
+        self.publish_party_markers(mask)
+    }
+
     pub(super) fn remote_party(&self) -> Result<[f64; 3]> {
         let mut mask: u8 = 0;
         for index in 0..3 {
@@ -50,8 +62,12 @@ impl Host {
                 mask = weak;
             }
         }
+        self.publish_party_markers(mask)
+    }
+
+    fn publish_party_markers(&self, mask: u8) -> Result<[f64; 3]> {
         let state = self.call(Op::RemotePartyState, &[f64::from(mask)])?;
-        let result = remote_hud(mask, state[0]);
+        let result = party_from_markers(mask, state[0]);
         if result[0] != 0. {
             self.action(Op::SetLoggedIn, &[1.])?;
         }
@@ -64,22 +80,22 @@ mod tests {
     use super::*;
     #[test]
     fn every_trio_position_is_identified() {
-        assert_eq!(remote_hud(6, 0.), [1., 0., 3.]);
-        assert_eq!(remote_hud(5, 0.), [1., 1., 3.]);
-        assert_eq!(remote_hud(3, 0.), [1., 2., 3.]);
+        assert_eq!(party_from_markers(6, 0.), [1., 0., 3.]);
+        assert_eq!(party_from_markers(5, 0.), [1., 1., 3.]);
+        assert_eq!(party_from_markers(3, 0.), [1., 2., 3.]);
     }
     #[test]
     fn single_missing_marker_never_shrinks_a_known_trio() {
         for mask in [1, 2, 4] {
-            assert_eq!(remote_hud(mask, 3.), [1., -1., 3.]);
+            assert_eq!(party_from_markers(mask, 3.), [1., -1., 3.]);
         }
-        assert_eq!(remote_hud(4, 0.), [1., -1., 3.]);
-        assert_eq!(remote_hud(0, 3.), [0., -1., 0.]);
-        assert_eq!(remote_hud(7, 3.), [0., -1., 0.]);
+        assert_eq!(party_from_markers(4, 0.), [1., -1., 3.]);
+        assert_eq!(party_from_markers(0, 3.), [0., -1., 0.]);
+        assert_eq!(party_from_markers(7, 3.), [0., -1., 0.]);
     }
     #[test]
     fn two_member_parties_remain_supported() {
-        assert_eq!(remote_hud(1, 0.), [1., 1., 2.]);
-        assert_eq!(remote_hud(2, 2.), [1., 0., 2.]);
+        assert_eq!(party_from_markers(1, 0.), [1., 1., 2.]);
+        assert_eq!(party_from_markers(2, 2.), [1., 0., 2.]);
     }
 }

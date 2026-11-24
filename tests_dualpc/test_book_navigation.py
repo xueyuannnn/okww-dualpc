@@ -21,7 +21,7 @@ def test_absolute_selection_resets_previous_scroll_and_stitches_overlapping_page
     task = SimpleNamespace(sleep=Mock(), screenshot=Mock(), info_set=Mock(), click=Mock(),
                            wait_feature=Mock(return_value=SimpleNamespace(name='team_close')))
     def scroll(x, y, amount):
-        assert (x, y) == (.68, .55)
+        assert (x, y) == (.53, .55)
         position[0] = 0 if amount > 50 else max(0, min(17, position[0] + (1 if amount < 0 else -1)))
     task.scroll_relative = scroll
     monkeypatch.setattr(book, 'read_rows', lambda _: [row(n) for n in range(position[0] + 1, position[0] + 5)])

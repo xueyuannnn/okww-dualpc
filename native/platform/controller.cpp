@@ -7,6 +7,11 @@ namespace okww {
 static constexpr uint32_t CONNECT = 0xAF3C2828, MOVE = 0xAEDE7345, LEFT = 0x9823AE8D, RIGHT = 0x238D8212,
                           MIDDLE = 0x97A3AE8D, WHEEL = 0xFFEEAD38, KEYBOARD = 0x123C2C2F;
 
+static bool localDxgi(const Config &config) {
+    return config.s("capture.source") == "desktop" && config.s("capture.local_backend") == "DXGI" &&
+           config.s("capture.recognition_mode") == "local";
+}
+
 static void controllerProtocolFailure(int kind) {
     switch (kind) {
     case 0:
@@ -399,6 +404,7 @@ struct ControllerInputSdk {
     int x = 0, y = 0, width = 0, height = 0, code = 0, steps = 0, index = -1;
     bool down = false;
     const QString *name = nullptr;
+    QString gameEntryWindow;
     QRect rect, desktop;
     QPoint point, normal;
     INPUT input{};
@@ -422,7 +428,7 @@ struct ControllerInputSdk {
             input.mi.dwFlags = MOUSEEVENTF_MOVE;
             break;
         case rust::WorkflowOp::ControllerInputSend:
-            c.localSend({input});
+            c.localSend({input}, false, gameEntryWindow);
             break;
         case rust::WorkflowOp::ControllerInputNetMove:
             c.mouse(MOVE, x, y);
@@ -503,7 +509,7 @@ struct ControllerInputSdk {
             c.buttons_ &= ~(1 << index);
             break;
         case rust::WorkflowOp::ControllerInputSendReleasing:
-            c.localSend({input}, !down);
+            c.localSend({input}, !down, gameEntryWindow);
             break;
         case rust::WorkflowOp::ControllerInputNetLeft:
             c.mouse(LEFT);
@@ -525,6 +531,11 @@ struct ControllerInputSdk {
             break;
         case rust::WorkflowOp::ControllerInputHid:
             input = hidInput(code, down);
+            if (code >= 58 && code <= 69 && localDxgi(c.cfg_)) {
+                input.ki.wVk = WORD(VK_F1 + code - 58);
+                input.ki.wScan = 0;
+                input.ki.dwFlags &= ~KEYEVENTF_SCANCODE;
+            }
             break;
         case rust::WorkflowOp::ControllerInputSetModifier:
             c.modifiers_ |= 1 << (code - 0xe0);
@@ -570,20 +581,23 @@ void Controller::move(int x, int y) {
     sdk.y = y;
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerMove, {}, sdk);
 }
-void Controller::absolute(int x, int y, int width, int height) {
+void Controller::absolute(int x, int y, int width, int height, const QString &gameEntryWindow) {
     std::lock_guard lock(mutex_);
     ControllerInputSdk sdk{*this};
     sdk.x = x;
     sdk.y = y;
     sdk.width = width;
     sdk.height = height;
+    sdk.gameEntryWindow = gameEntryWindow;
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerAbsolute, {}, sdk);
 }
-void Controller::button(const QString &name, bool down) {
+void Controller::button(const QString &name, bool down, const QString &gameEntryWindow) {
     std::lock_guard lock(mutex_);
     ControllerInputSdk sdk{*this};
     sdk.name = &name;
     sdk.down = down;
+    if (name == "left")
+        sdk.gameEntryWindow = gameEntryWindow;
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerButton, {}, sdk);
 }
 void Controller::key(int code, bool down) {
@@ -632,11 +646,22 @@ struct ControllerLocalSdk {
     Controller &c;
     std::vector<INPUT> &inputs;
     bool releasing;
+    const QString &gameEntryWindow;
     QJsonObject environment;
     QStringList names, labels;
     QString cls;
     i64 began = 0;
     UINT sent = 0;
+    bool requiresGameForeground() const {
+        return localDxgi(c.cfg_) && (!c.cfg_.b("kmbox.dry_run") || c.localEnvironment_);
+    }
+    bool gameForeground() const {
+        const auto &foreground = c.lastLocalEnvironment_;
+        const auto title = foreground["title"].toString().trimmed();
+        return foreground["class"].toString() == "UnrealWindow" &&
+               foreground["executable"].toString().compare("Client-Win64-Shipping.exe", Qt::CaseInsensitive) == 0 &&
+               (title == "鸣潮" || title == "鳴潮" || title.compare("Wuthering Waves", Qt::CaseInsensitive) == 0);
+    }
     void operator()(rust::WorkflowOp op, const double *a, double *out) {
         switch (op) {
         case rust::WorkflowOp::ControllerLocalConnected:
@@ -718,15 +743,27 @@ struct ControllerLocalSdk {
             environment = {};
             break;
         case rust::WorkflowOp::ControllerLocalHasTarget:
-            out[0] = bool(c.target_);
+            out[0] = bool(c.target_) || requiresGameForeground();
             break;
         case rust::WorkflowOp::ControllerLocalTargetRect:
-            c.target_->rect();
+            if (c.target_)
+                c.target_->rect();
             break;
         case rust::WorkflowOp::ControllerLocalTargetForeground:
-            out[0] = c.target_->foreground();
+            if (requiresGameForeground() && !gameEntryWindow.isEmpty()) {
+                out[0] = isGameLauncher(c.lastLocalEnvironment_) &&
+                         gameEntryWindow == c.lastLocalEnvironment_["hwnd"].toString() &&
+                         (!c.target_ || c.target_->foreground());
+                break;
+            }
+            out[0] = c.target_ ? c.target_->foreground() : gameForeground();
             break;
         case rust::WorkflowOp::ControllerLocalTargetError:
+            if (requiresGameForeground() && !gameEntryWindow.isEmpty())
+                throw LocalInputBlocked("等待识别到「进入游戏」的鸣潮启动器回到前台");
+            if (!c.target_)
+                throw LocalInputBlocked("等待鸣潮切回前台，当前窗口：" +
+                                        c.lastLocalEnvironment_["title"].toString());
             throw LocalInputBlocked("等待指定的游戏或远程窗口返回前台");
         case rust::WorkflowOp::ControllerLocalInputMouse:
             out[0] = inputs[size_t(a[0])].type == INPUT_MOUSE;
@@ -764,8 +801,8 @@ struct ControllerLocalSdk {
         }
     }
 };
-void Controller::localSend(std::vector<INPUT> inputs, bool releasing) {
-    ControllerLocalSdk sdk{*this, inputs, releasing};
+void Controller::localSend(std::vector<INPUT> inputs, bool releasing, const QString &gameEntryWindow) {
+    ControllerLocalSdk sdk{*this, inputs, releasing, gameEntryWindow};
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerLocalSend, {}, sdk);
 }
 

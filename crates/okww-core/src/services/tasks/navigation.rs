@@ -1,6 +1,8 @@
 // Preserve the original treatment of unordered floating-point bounds.
 #![allow(clippy::manual_range_contains)]
 use crate::services::*;
+// Scroll on the challenge name. The material cards consume the wheel horizontally.
+const BOOK_WHEEL_POINT: [f64; 2] = [0.53, 0.55];
 impl Host {
     fn retry_limit(&self) -> Result<i32> {
         if self.flag(Op::InCombat, &[])?
@@ -181,27 +183,74 @@ impl Host {
         self.action(Op::GuidePageFailure, &[])?;
         Err(HOST_ERROR)
     }
+    fn wait_book_tab(&self, timeout: f64, settle: f64, local: bool) -> Result<bool> {
+        self.observe(
+            || {
+                self.action(Op::ClearTab, &[])?;
+                Ok((local || !self.flag(Op::InTeam, &[])?)
+                    && self.flag(Op::FindBookTab, &[0.6])?)
+            },
+            timeout,
+            settle,
+        )
+    }
+    fn click_guide_icon(&self) -> Result {
+        self.action(Op::KeyDown, &[1.])?;
+        self.guarded_keys(|| {
+            self.action(Op::Sleep, &[0.05])?;
+            self.action(Op::ClickRelative, &[0.77, 0.05, 0.])?;
+            self.action(Op::Sleep, &[0.02])?;
+            self.action(Op::KeyUp, &[1.])
+        })
+    }
+    fn open_local_book(&self) -> Result {
+        self.action(Op::Refresh, &[])?;
+        let already_open = self.flag(Op::BookVisible, &[])?;
+        if !already_open {
+            self.ensure_main(30., true, false)?;
+            self.action(Op::Key, &[5., 0.])?;
+        }
+        let mut opened = self.wait_book_tab(3., 0.3, true)?;
+        if !opened && !self.flag(Op::BookVisible, &[])? && self.flag(Op::InTeam, &[])? {
+            self.click_guide_icon()?;
+            opened = self.wait_book_tab(3., 0.3, true)?;
+        }
+        if !opened {
+            return if !self.flag(Op::BookVisible, &[])? && self.flag(Op::InTeam, &[])? {
+                self.fail(21.)
+            } else {
+                self.fail(4.)
+            };
+        }
+        self.action(Op::ClickTab, &[1.5])?;
+        if !self.flag(Op::BookVisible, &[])? && self.flag(Op::InTeam, &[])? {
+            return self.fail(5.);
+        }
+        Ok(())
+    }
     fn open_book(&self, reuse_existing: bool) -> Result {
+        let desktop = self.flag(Op::DesktopCapture, &[])?;
+        if desktop && self.flag(Op::LocalDesktopGuide, &[])? {
+            return self.retry(2., || self.open_local_book());
+        }
         self.retry(2., || {
             if reuse_existing {
                 self.action(Op::Refresh, &[])?;
                 self.action(Op::ClearTab, &[])?;
-                if !self.flag(Op::InTeam, &[])?
+                let recognized = !self.flag(Op::InTeam, &[])?
                     && self.flag(Op::FindBookTab, &[0.6])?
-                    && self.observe(
-                        || {
-                            self.action(Op::ClearTab, &[])?;
-                            Ok(!self.flag(Op::InTeam, &[])?
-                                && self.flag(Op::FindBookTab, &[0.6])?)
-                        },
-                        0.8,
-                        0.15,
-                    )?
-                {
+                    && self.wait_book_tab(0.8, 0.15, false)?;
+                // A delayed sidebar redraw should not close an already open guide.
+                let guide_open = !recognized
+                    && desktop
+                    && self.flag(Op::BookVisible, &[])?;
+                if recognized || (guide_open && self.wait_book_tab(3., 0.15, false)?) {
                     self.action(Op::ClickTab, &[1.5])?;
                     if !self.flag(Op::InTeam, &[])? {
                         return Ok(());
                     }
+                } else if guide_open && self.flag(Op::BookVisible, &[])? {
+                    return self.fail(4.);
                 }
             }
             self.ensure_main(30., true, false)?;
@@ -209,27 +258,14 @@ impl Host {
                 self.action(Op::Key, &[5., 4.])?;
             }
             if self.flag(Op::InTeam, &[])? {
-                self.action(Op::KeyDown, &[1.])?;
-                self.guarded_keys(|| {
-                    self.action(Op::Sleep, &[0.05])?;
-                    self.action(Op::ClickRelative, &[0.77, 0.05, 0.])?;
-                    self.action(Op::Sleep, &[0.02])?;
-                    self.action(Op::KeyUp, &[1.])
-                })?;
+                self.click_guide_icon()?;
                 self.action(Op::Sleep, &[4.])?;
             }
-            let opened = self.observe(
-                || {
-                    self.action(Op::ClearTab, &[])?;
-                    if self.flag(Op::InTeam, &[])? {
-                        return Ok(false);
-                    }
-                    self.flag(Op::FindBookTab, &[0.6])
-                },
-                3.,
-                0.5,
-            )?;
+            let opened = self.wait_book_tab(3., 0.5, false)?;
             if !opened {
+                if desktop && self.flag(Op::InTeam, &[])? {
+                    return self.fail(21.);
+                }
                 return self.fail(4.);
             }
             self.action(Op::ClickTab, &[1.5])?;
@@ -513,10 +549,11 @@ impl Host {
         }
         let mut count = 0_usize;
         let mut top_ready = false;
+        let [wheel_x, wheel_y] = BOOK_WHEEL_POINT;
         for reset in 0..3 {
             self.action(
                 Op::Scroll,
-                &[if from_end { -100. } else { 100. }, 0.68, 0.55],
+                &[if from_end { -100. } else { 100. }, wheel_x, wheel_y],
             )?;
             self.action(Op::Sleep, &[0.45])?;
             count = self.scalar(Op::ReadProceedRows, &[])? as usize;
@@ -574,7 +611,7 @@ impl Host {
                 continue;
             }
             self.action(Op::StoreBookRows, &[])?;
-            self.action(Op::Scroll, &[-2., 0.68, 0.55])?;
+            self.action(Op::Scroll, &[-2., wheel_x, wheel_y])?;
             self.action(Op::Sleep, &[0.45])?;
             let mut observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
             if let Some(offset) = self.settled_book_overlap(count, &mut observed)? {
@@ -587,7 +624,7 @@ impl Host {
                 count = observed;
             } else {
                 // Return toward the last verified page; never assign a guessed ordinal.
-                self.action(Op::Scroll, &[1., 0.68, 0.55])?;
+                self.action(Op::Scroll, &[1., wheel_x, wheel_y])?;
                 self.action(Op::Sleep, &[0.35])?;
                 let mut recovered = self.scalar(Op::ReadProceedRows, &[])? as usize;
                 if let Some(offset) = self.settled_book_overlap(count, &mut recovered)? {

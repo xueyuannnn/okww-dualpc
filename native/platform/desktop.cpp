@@ -834,6 +834,13 @@ QJsonObject localInputEnvironment() {
     rust::platformWorkflowRun(rust::WorkflowMethod::DesktopInputEnvironment, {}, sdk);
     return sdk.value;
 }
+bool isGameLauncher(const QJsonObject &environment) {
+    const auto title = environment["title"].toString().trimmed();
+    const auto executable = environment["executable"].toString(QFileInfo(environment["exe"].toString()).fileName());
+    return executable.compare("launcher_main.exe", Qt::CaseInsensitive) == 0 &&
+           environment["class"].toString().startsWith("HwndWrapper[launcher_main;") &&
+           (title == "鸣潮" || title == "鳴潮" || title.compare("Wuthering Waves", Qt::CaseInsensitive) == 0);
+}
 
 struct PhysicalKeysSdk {
     PhysicalKeys &p;

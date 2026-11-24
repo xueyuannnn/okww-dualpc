@@ -675,6 +675,150 @@ class WorkflowTests : public QObject {
         QCOMPARE(s.scene,QString("book"));
         QVERIFY(s.clock.time < 3);
     }
+    void desktopGuideRecognizesResizedTabsAt4K_data() {
+        QTest::addColumn<bool>("reuse");
+        QTest::newRow("from-world") << false;
+        QTest::newRow("already-open") << true;
+    }
+    void desktopGuideRecognizesResizedTabsAt4K() {
+        QFETCH(bool, reuse);
+        Scenes s({3840, 2160});
+        s.c.streamedCapture = true;
+        s.c.localDesktopGame = true;
+        s.frame("book", {});
+        QPoint expected;
+        for (const auto &feature : {QString("gray_book_quest"), QString("gray_book_weekly")}) {
+            const auto box = s.templates.box(feature, s.size);
+            auto icon = s.templates.pattern(feature, s.size);
+            cv::resize(icon, icon, {}, .72, .72, cv::INTER_AREA);
+            if (icon.channels() == 1)
+                cv::cvtColor(icon, icon, cv::COLOR_GRAY2BGR);
+            const auto center = box.center() + QPoint(12, 38);
+            icon.copyTo(s.frames["book"](cv::Rect(center.x() - icon.cols / 2, center.y() - icon.rows / 2,
+                                                 icon.cols, icon.rows)));
+            if (feature == "gray_book_quest")
+                expected = center;
+        }
+        s.show("book");
+        QVERIFY(!s.c.find("gray_book_quest", {.threshold = .6,
+            .search = s.templates.box("box_gray_book", s.size), .grayscale = true}));
+        s.show(reuse ? "book" : "world");
+        s.c.state->loggedIn = true;
+        int escapes = 0, opens = 0;
+        s.action = [&](auto event) {
+            if (s.keyUp(event, Input::keyCode("esc")))
+                ++escapes;
+            if (s.keyUp(event, Input::keyCode("f2"))) {
+                ++opens;
+                s.scene = "book";
+            }
+        };
+        auto result = Navigation(s.c).openBook("gray_book_quest", true);
+        QCOMPARE(s.clicks(), 1);
+        QCOMPARE(opens, reuse ? 0 : 1);
+        QCOMPARE(escapes, 0);
+        QVERIFY((result.center().toPoint() - expected).manhattanLength() < 5);
+    }
+    void desktopGuideKeepsRecognizedPageOpenIfRequestedTabIsMissing() {
+        Scenes s;
+        s.c.streamedCapture = true;
+        s.c.localDesktopGame = true;
+        s.profile.set("Task Recovery", "Resume Interrupted Tasks", false);
+        s.frame("book", {"gray_book_boss", "gray_book_weekly"});
+        s.show("book");
+        QJsonObject diagnostic;
+        s.c.diagnostic = [&](QString title, QJsonObject details) {
+            QCOMPARE(title, QString("索拉指南导航失败"));
+            diagnostic = details;
+        };
+        QVERIFY_THROWS_EXCEPTION(NavigationFailure, Navigation(s.c).openBook("gray_book_quest"));
+        QVERIFY(s.events.isEmpty());
+        QCOMPARE(diagnostic.value("tab").toString(), QString("gray_book_quest"));
+        QCOMPARE(diagnostic.value("hotkey_attempts").toInt(-1), 0);
+        QCOMPARE(diagnostic.value("last_guide_visible"), QJsonValue(true));
+        QCOMPARE(diagnostic.value("tab_observation").toObject().value("scaled_match"), QJsonValue(false));
+    }
+    void desktopGuideReportsThatTheGuideDidNotOpenWhenTeamHudRemains() {
+        Scenes s;
+        s.c.streamedCapture = true;
+        s.c.localDesktopGame = true;
+        s.c.state->loggedIn = true;
+        s.profile.set("Task Recovery", "Resume Interrupted Tasks", false);
+        s.show("world");
+        double keyDown = -1, hold = 0;
+        const auto key = Input::keyCode("f2");
+        s.action = [&](auto event) {
+            if (event["op"] != "key" || event["code"].toInt() != key)
+                return;
+            if (event["down"].toBool())
+                keyDown = s.clock.now();
+            else
+                hold = s.clock.now() - keyDown;
+        };
+        QString error;
+        QJsonObject diagnostic;
+        s.c.diagnostic = [&](QString, QJsonObject details) { diagnostic = details; };
+        try {
+            Navigation(s.c).openBook("gray_book_boss");
+        } catch (const NavigationFailure &failure) {
+            error = QString::fromUtf8(failure.what());
+        }
+        QVERIFY(error.contains("未打开索拉指南"));
+        QVERIFY(hold >= .119);
+        QCOMPARE(diagnostic.value("hotkey_attempts").toInt(), 1);
+        QCOMPARE(s.scene, QString("world"));
+    }
+    void localGuideChecksSidebarWhilePartyHudIsStillVisible() {
+        Scenes s;
+        s.c.streamedCapture = true;
+        s.c.localDesktopGame = true;
+        s.frame("transition", {"char_2_text", "char_3_text", "gray_book_boss", "gray_book_weekly"});
+        s.show("world");
+        int opened = 0, otherInput = 0;
+        s.action = [&](auto event) {
+            if (s.keyUp(event, Input::keyCode("f2"))) {
+                ++opened;
+                s.scene = "transition";
+            }
+            if (s.keyUp(event, Input::keyCode("alt")) || s.keyUp(event, Input::keyCode("esc")))
+                ++otherInput;
+        };
+        Navigation(s.c).openBook("gray_book_boss");
+        QCOMPARE(opened, 1);
+        QCOMPARE(otherInput, 0);
+        QCOMPARE(s.clicks(), 1);
+    }
+    void loginMarksOnlyTheRecognizedLauncherClick_data() {
+        QTest::addColumn<bool>("desktop");
+        QTest::addColumn<bool>("local");
+        QTest::newRow("local") << true << true;
+        QTest::newRow("remote") << true << false;
+        QTest::newRow("capture-card") << false << false;
+    }
+    void loginMarksOnlyTheRecognizedLauncherClick() {
+        QFETCH(bool, desktop);
+        QFETCH(bool, local);
+        Scenes s;
+        s.c.streamedCapture = desktop;
+        s.c.localDesktopGame = local;
+        s.c.recognitionEnvironment = {{"exe", "C:/Wuthering Waves/launcher_main.exe"},
+            {"class", "HwndWrapper[launcher_main;;fixture]"}, {"title", "鸣潮"}, {"hwnd", "512"}};
+        s.words["blank"] = {s.word("进入游戏", .73, .77)};
+        s.show("blank");
+        QVERIFY(s.c.login());
+        QCOMPARE(s.clicks(), 1);
+        int guardedInputs = 0;
+        for (const auto &event : s.events) {
+            if (event["op"] == "absolute" || (event["op"] == "button" && event["down"].toBool())) {
+                QCOMPARE(event.value("game_entry_window").toString(), local ? QString("512") : QString());
+                ++guardedInputs;
+            }
+        }
+        QCOMPARE(guardedInputs, 2);
+        s.c.clickRelative(.5, .5);
+        QCOMPARE(s.clicks(), 2);
+        QVERIFY(!s.events.last().contains("game_entry_window"));
+    }
     void resourcePageWaitsForDelayedOrDroppedRemoteClicks_data() {
         QTest::addColumn<int>("dropped");QTest::addColumn<double>("delay");
         QTest::newRow("first-click")<<0<<0.;
@@ -1361,6 +1505,74 @@ class WorkflowTests : public QObject {
         QCOMPARE(balance, confirmed ? 10 : 65);
         QCOMPARE(closeCount, 1);
         QVERIFY(s.input.idle());
+    }
+    void remoteWeeklyEventWaitsForConfirmationAndReturnsToWeeklyRewards() {
+        Scenes s;
+        s.c.streamedCapture = true;
+        s.frame("event", {});
+        s.frame("opening", {});
+        s.frame("confirm", {});
+        s.frame("finish", {"garden_next_day"});
+        s.frame("book", {"gray_book_quest"});
+        s.words["book"] = {s.word("周度游历", .3, .12), s.word("本周游历值已满", .1, .8, .22)};
+        const auto paint = [&](const QString &page, const QString &feature, const QPoint &offset) {
+            const auto box = s.templates.box(feature, s.size).translated(offset);
+            auto icon = s.templates.pattern(feature, s.size);
+            if (icon.channels() == 1)
+                cv::cvtColor(icon, icon, cv::COLOR_GRAY2BGR);
+            icon.copyTo(s.frames[page](cv::Rect(box.x(), box.y(), box.width(), box.height())));
+            return box.center();
+        };
+        paint("event", "garden_not_interested", {12, 24});
+        const auto last = paint("event", "garden_not_interested", {12, 287});
+        const auto confirm = paint("confirm", "garden_not_interested_confirm", {17, 5});
+        const auto back = paint("finish", "a_garden_back", {16, 4});
+        paint("finish", "a_garden_restart", {16, 4});
+        for (const auto &page : {"event", "confirm", "finish"}) {
+            std::vector<uchar> bytes;
+            cv::imencode(".jpg", s.frames[page], bytes, {cv::IMWRITE_JPEG_QUALITY, 48});
+            s.frames[page] = cv::imdecode(bytes, cv::IMREAD_COLOR);
+        }
+        int choices = 0, confirmations = 0, returns = 0;
+        double readyAt = -1;
+        s.clock.tick = [&] {
+            if (s.scene == "opening" && s.clock.now() >= readyAt)
+                s.scene = "confirm";
+        };
+        s.action = [&](auto event) {
+            if (s.keyUp(event, Input::keyCode("f2"))) {
+                s.scene = "book";
+                return;
+            }
+            if (!s.leftUp(event))
+                return;
+            const auto at = [&](QPoint point) { return (s.pointer - point).manhattanLength() < 12; };
+            if (s.scene == "event" && at(last)) {
+                ++choices;
+                s.scene = "opening";
+                readyAt = s.clock.now() + 3.6;
+            } else if (s.scene == "confirm" && at(confirm)) {
+                ++confirmations;
+                s.scene = "finish";
+            } else if (s.scene == "finish" && (s.pointer - back).manhattanLength() < 24) {
+                ++returns;
+                s.scene = "world";
+            } else if (s.scene != "book") {
+                fail("远程周常点错特殊事件选项、未等确认出现，或未优先退出结算页");
+            }
+        };
+        s.show("event");
+        QVERIFY(!s.c.find("garden_not_interested", {.vertical = .4}));
+        try {
+            Garden(s.c, s.root).run();
+        } catch (const std::exception &error) {
+            QFAIL(qPrintable(QString("%1 · %2 · (%3, %4)")
+                .arg(QString::fromUtf8(error.what()), s.scene).arg(s.pointer.x()).arg(s.pointer.y())));
+        }
+        QCOMPARE(choices, 1);
+        QCOMPARE(confirmations, 1);
+        QCOMPARE(returns, 1);
+        QCOMPARE(s.scene, QString("book"));
     }
     void weeklyRoundUsesMaxAndChecksSkillEachTurnThenReturnsToWeeklyRewards() {
         Scenes s;

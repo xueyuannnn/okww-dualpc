@@ -30,7 +30,7 @@ class Controller {
     std::function<QJsonObject()> localEnvironment_;
     QJsonObject lastLocalEnvironment_;
     bool local() const { return cfg_.s("kmbox.protocol") == "sendinput"; }
-    void localSend(std::vector<INPUT> inputs, bool releasing = false);
+    void localSend(std::vector<INPUT> inputs, bool releasing = false, const QString &gameEntryWindow = {});
     void noteLatency(i64 began);
     void recordPacket(const QByteArray &data);
     void exchange(uint32_t command, const QByteArray &payload = {});
@@ -46,8 +46,8 @@ class Controller {
     void release();
     void probe();
     void move(int x, int y);
-    void absolute(int x, int y, int width, int height);
-    void button(const QString &name, bool down);
+    void absolute(int x, int y, int width, int height, const QString &gameEntryWindow = {});
+    void button(const QString &name, bool down, const QString &gameEntryWindow = {});
     void key(int code, bool down);
     void wheel(int steps);
     bool connected();

@@ -324,7 +324,7 @@ impl Host {
         if self.m_match("开始游戏|进入游戏|進入遊戲|Enter Game", 2, 0)?
             && !self.m_match(LOGIN, 2, 1)?
         {
-            self.action(Op::ClickText, &[0., 1.])?;
+            self.action(Op::ClickGameEntry, &[0., 1.])?;
             return Ok(true);
         }
         if self.m_find("switch_account", 0, 0.7, 0.002, 0.1)? {

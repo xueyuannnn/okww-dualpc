@@ -51,10 +51,13 @@ bool TaskContext::canBackToWorld() {
         {.threshold = .82, .grayscale = true, .blurSigma = .6}).has_value();
 }
 PartyHud TaskContext::party() {
-    const bool guarded=streamedCapture || streamedImage();
+    const bool local = streamedCapture && localDesktopGame;
+    const bool guarded = streamedCapture || streamedImage();
     if (guarded && remotePartyVersion_ == frameVersion && remotePartySize_ == frame.size())
         return remoteParty_;
-    const auto result = rustRun(int(guarded ? rust::TaskMethod::RemoteParty : rust::TaskMethod::Party));
+    const auto method = local ? rust::TaskMethod::LocalParty
+                              : guarded ? rust::TaskMethod::RemoteParty : rust::TaskMethod::Party;
+    const auto result = rustRun(int(method));
     if (guarded) {
         remotePartyVersion_ = frameVersion;
         remotePartySize_ = frame.size();

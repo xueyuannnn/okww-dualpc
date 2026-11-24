@@ -107,7 +107,7 @@ def _locate_book_target(task, serial, total, from_end=False):
         raise ValueError('索拉指南目标序号超出范围')
 
     def scroll(amount):
-        task.scroll_relative(.68, .55, amount)
+        task.scroll_relative(.53, .55, amount)
         task.sleep(.45)
 
     def settled_overlap(previous):

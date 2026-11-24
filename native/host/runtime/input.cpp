@@ -2,6 +2,7 @@
 #include "controller.hpp"
 #include "diagnostics.hpp"
 #include "workflow_abi.hpp"
+#include <QScopedValueRollback>
 namespace okww::runtime {
 int Input::keyCode(QString key) {
     key = key.toLower();
@@ -329,6 +330,8 @@ void Input::send(QJsonObject command) {
     rustInput(int(rust::WorkflowMethod::InputSend), {}, std::move(r));
 }
 QJsonObject Input::transmit(QJsonObject command) {
+    if (!gameEntryWindow_.isEmpty())
+        command.insert("game_entry_window", gameEntryWindow_);
     RustRequest r;
     r.command = std::move(command);
     QJsonObject reply;
@@ -362,6 +365,10 @@ void Input::click(std::optional<QPointF> point, double seconds, QString button) 
     r.point = point;
     r.key = std::move(button);
     rustInput(int(rust::WorkflowMethod::InputClick), {seconds}, std::move(r));
+}
+void Input::taskClick(QPointF point, const QString &gameEntryWindow) {
+    QScopedValueRollback scope(gameEntryWindow_, gameEntryWindow);
+    click(point, config_.d("kmbox.ui_click_hold"));
 }
 void Input::scroll(int steps, std::optional<QPointF> point) {
     RustRequest r;

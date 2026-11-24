@@ -1,8 +1,31 @@
 #include "window.hpp"
+#include "scheduler.hpp"
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QCryptographicHash>
+#include <shellapi.h>
 using namespace okww;
+namespace {
+bool requestAdministratorLaunch() {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return false;
+    TOKEN_ELEVATION elevation{};
+    DWORD returned = 0;
+    const bool readable = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &returned);
+    CloseHandle(token);
+    if (!readable || elevation.TokenIsElevated)
+        return false;
+
+    QStringList quoted;
+    for (const auto &argument : QCoreApplication::arguments().mid(1))
+        quoted.append(runtime::Scheduler::quoteArgument(argument));
+    const auto executable = QDir::toNativeSeparators(QCoreApplication::applicationFilePath()).toStdWString();
+    const auto arguments = quoted.join(' ').toStdWString();
+    return reinterpret_cast<INT_PTR>(
+               ShellExecuteW(nullptr, L"runas", executable.c_str(), arguments.c_str(), nullptr, SW_SHOWNORMAL)) > 32;
+}
+}
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     QApplication::setStyle("Fusion");
@@ -18,6 +41,8 @@ int main(int argc, char **argv) {
                        {"limit-seconds", "Maximum scheduled execution time; 0 is unlimited", "seconds", "0"},
                        {"smoke", "Offline native UI check report", "path"}});
     parser.process(app);
+    if (!parser.isSet("run-task") && !parser.isSet("smoke") && requestAdministratorLaunch())
+        return 0;
     try {
         QString root = parser.value("root");
         if (root.isEmpty()) {

@@ -275,6 +275,64 @@ bool Garden::maximizeSpeed() {
                    }
                })[0] != 0;
 }
+bool Garden::remoteImage() const {
+    return c_.streamedCapture && !c_.localDesktopGame && c_.streamedImage();
+}
+std::optional<Match> Garden::matchRemoteControl(const QString &name) {
+    const auto box = c_.templates.box(name, {c_.frame.cols, c_.frame.rows});
+    const int xMargin = std::max(box.width() / 4, pixelRound(c_.frame.cols * .012));
+    const int yMargin = std::max(box.height() / 4, pixelRound(c_.frame.rows * .012));
+    const auto area = box.adjusted(-xMargin, -yMargin, xMargin, yMargin);
+    std::optional<Match> best;
+    for (const auto scale : {1., .9, 1.1}) {
+        const auto match = c_.find(name, {.threshold = .80, .search = area, .grayscale = true,
+                                         .templateScale = scale, .blurSigma = .8});
+        if (match && (!best || match->confidence > best->confidence))
+            best = match;
+    }
+    return best;
+}
+std::optional<Match> Garden::findControl(const QString &name, MatchOptions options) {
+    auto match = c_.find(name, options);
+    if (!match && remoteImage())
+        match = matchRemoteControl(name);
+    return match;
+}
+std::optional<Match> Garden::finishedRoundBack() {
+    auto back = findControl("a_garden_back");
+    if (back && findControl("a_garden_restart"))
+        return back;
+    return {};
+}
+QVector<Match> Garden::eventOptions() {
+    const QString name = "garden_not_interested";
+    auto options = c_.templates.find(c_.frame, name, {.vertical = .4, .limit = 0});
+    if (!remoteImage())
+        return options;
+
+    const bool exactRows = !options.isEmpty();
+    const auto box = c_.templates.box(name, {c_.frame.cols, c_.frame.rows});
+    const int dx = pixelRound(c_.frame.cols * .012);
+    const int dy = pixelRound(c_.frame.rows * .4);
+    const auto area = box.adjusted(-dx, -dy, dx, dy);
+    // The event rows share a column, but the last row moves with the text height.
+    for (const auto scale : {1., .9, 1.1}) {
+        const auto matches = c_.templates.find(c_.frame, name, {.threshold = .82, .search = area,
+            .grayscale = true, .limit = 12, .templateScale = scale, .blurSigma = .6});
+        for (const auto &match : matches) {
+            const auto sameRow = [&](const Match &option) {
+                return std::abs(option.center().y() - match.center().y()) <= box.height();
+            };
+            if (std::none_of(options.begin(), options.end(), sameRow))
+                options.append(match);
+        }
+    }
+    if (!exactRows && options.size() < 2)
+        return {};
+    std::sort(options.begin(), options.end(),
+              [](const Match &a, const Match &b) { return a.center().y() < b.center().y(); });
+    return options;
+}
 std::optional<Match> Garden::bestFeature() {
     std::optional<Match> modern, target, result;
     QStringList names;
@@ -362,7 +420,19 @@ std::optional<Match> Garden::bestFeature() {
                 MatchOptions options;
                 options.limit = 0;
                 options.vertical = a[1];
-                matches += c_.templates.find(c_.frame, names.at(int(a[0])), options);
+                const auto &name = names.at(int(a[0]));
+                if (name == "garden_not_interested") {
+                    matches += eventOptions();
+                    break;
+                }
+                auto current = c_.templates.find(c_.frame, name, options);
+                static const QStringList remoteControls{"garden_next_day", "garden_new_stage",
+                    "garden_get_skip", "garden_shop_close", "garden_start_game"};
+                if (current.isEmpty() && remoteImage() && remoteControls.contains(name)) {
+                    if (auto match = matchRemoteControl(name))
+                        current.append(*match);
+                }
+                matches += current;
                 break;
             }
             case rust::WorkflowOp::GardenFeatureMatchCount: {
@@ -441,9 +511,15 @@ bool Garden::active() {
                        break;
                    }
                    case rust::WorkflowOp::GardenActiveFeatures: {
-                       out[0] = bool(c_.findAny(
-                           {"garden_next_day", "garden_new_stage", "garden_get_skip", "garden_shop_close"},
-                           {.threshold = a[0]}));
+                       const QStringList controls{"garden_next_day", "garden_new_stage", "garden_get_skip",
+                                                  "garden_shop_close"};
+                       out[0] = bool(c_.findAny(controls, {.threshold = a[0]}));
+                       if (!out[0] && remoteImage()) {
+                           out[0] = finishedRoundBack().has_value() ||
+                                    std::any_of(controls.begin(), controls.end(),
+                                                [&](const auto &name) { return matchRemoteControl(name).has_value(); }) ||
+                                    !eventOptions().isEmpty();
+                       }
                        break;
                    }
                    case rust::WorkflowOp::GardenActiveReward: {
@@ -482,7 +558,8 @@ bool Garden::active() {
                })[0] != 0;
 }
 void Garden::loop() {
-    std::optional<Match> target, tier, restart, back;
+    std::optional<Match> target, tier, back, eventConfirm;
+    QString lastControl;
     QVector<Match> items;
     rust::workflowRun(
         rust::WorkflowMethod::GardenLoop, {}, [&](rust::WorkflowOp op, const double *a, double *out) {
@@ -537,8 +614,13 @@ void Garden::loop() {
             }
             case rust::WorkflowOp::ReadBestGardenFeature: {
                 target = bestFeature();
+                if (target)
+                    lastControl = target->name;
                 break;
             }
+            case rust::WorkflowOp::GardenRemoteCapture:
+                out[0] = remoteImage();
+                break;
             case rust::WorkflowOp::BestGardenFeatureExists: {
                 out[0] = target.has_value();
                 break;
@@ -573,7 +655,7 @@ void Garden::loop() {
                 break;
             }
             case rust::WorkflowOp::ReadGardenNotInterested: {
-                items = c_.templates.find(c_.frame, "garden_not_interested", {.vertical = a[0], .limit = 0});
+                items = eventOptions();
                 out[0] = double(items.size());
                 break;
             }
@@ -581,14 +663,23 @@ void Garden::loop() {
                 c_.click(items.back(), a[0]);
                 break;
             }
+            case rust::WorkflowOp::FindGardenEventConfirm: {
+                eventConfirm = findControl("garden_not_interested_confirm");
+                out[0] = eventConfirm.has_value();
+                break;
+            }
+            case rust::WorkflowOp::ClickGardenEventConfirm: {
+                lastControl = eventConfirm->name;
+                c_.click(*eventConfirm, a[0]);
+                break;
+            }
             case rust::WorkflowOp::ClickBestGardenFeature: {
                 c_.click(*target, a[0]);
                 break;
             }
             case rust::WorkflowOp::ReadGardenFinishButtons: {
-                restart = c_.find("a_garden_restart");
-                back = c_.find("a_garden_back");
-                out[0] = restart.has_value();
+                back = finishedRoundBack();
+                out[0] = back.has_value();
                 out[1] = back.has_value();
                 break;
             }
@@ -597,7 +688,7 @@ void Garden::loop() {
                 break;
             }
             case rust::WorkflowOp::FindGardenStart: {
-                out[0] = bool(c_.find("garden_start_game"));
+                out[0] = bool(findControl("garden_start_game"));
                 break;
             }
             case rust::WorkflowOp::Key: {
@@ -605,7 +696,11 @@ void Garden::loop() {
                 break;
             }
             case rust::WorkflowOp::Throw: {
-                throw NavigationFailure("周常当前步骤长时间未推进，保留现场等待恢复");
+                const QString reason = "周常当前步骤长时间未推进，保留现场等待恢复";
+                if (remoteImage() && c_.diagnostic)
+                    c_.diagnostic(reason, {{"mode", "remote"}, {"last_control", lastControl},
+                        {"frame_width", c_.frame.cols}, {"frame_height", c_.frame.rows}});
+                throw NavigationFailure(reason);
                 break;
             }
             default:

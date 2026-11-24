@@ -37,6 +37,11 @@ class Garden {
     double speedChecked_ = -1e12;
     int speedAttempts_ = 0;
     QJsonObject weeklyObservation_;
+    bool remoteImage() const;
+    std::optional<Match> findControl(const QString &name, MatchOptions options = {});
+    std::optional<Match> matchRemoteControl(const QString &name);
+    std::optional<Match> finishedRoundBack();
+    QVector<Match> eventOptions();
     std::optional<QPair<int, int>> turn();
     std::pair<std::optional<TextLine>, std::optional<int>> blessingControls();
     bool useBlessing(bool open = false);

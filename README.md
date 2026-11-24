@@ -4,14 +4,14 @@
 
 双机模式通过采集卡读取画面、KMBox Net 发送键鼠操作；也可使用本机 DXGI 截图和 SendInput 输入。业务内核使用 Rust，负责内置任务、角色连招、识别策略和设备控制；C++ 保留 Qt 界面及底层 SDK 适配，工坊、通用脚本和活动流程使用独立 Python 环境。
 
-基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.28**，支持 Windows 10／11 x64。
+基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.33**，支持 Windows 10／11 x64。
 
 ## 下载与安装
 
 | 下载 | 用途 |
 | --- | --- |
 | **[① 固定环境包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/environment-win10-11-x64-67a1e8aae098)** · 约 625 MB | 首次安装下载一次，包含运行库、Python 和识别模型 |
-| **[② beta.28 累计增量包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/v0.2.0-beta.28)** · 约 21 MB | 程序、脚本和界面资源；每个版本只需安装这一份 |
+| **[② beta.33 累计增量包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/v0.2.0-beta.33)** · 约 21 MB | 程序、脚本和界面资源；每个版本只需安装这一份 |
 | [其他版本](https://github.com/xueyuannnn/okww-dualpc/releases) · [使用说明](docs/usage.md) · [问题反馈](https://github.com/xueyuannnn/okww-dualpc/issues) | 源码和校验文件在对应版本的 Assets 中 |
 
 **首次安装**：下载①和②，将两个 ZIP 内的 `OKWW-DualPC-full` 文件夹合并解压到同一个位置，运行其中的 `OKWW-DualPC-Native-Dev.exe`，无需另装 Python。

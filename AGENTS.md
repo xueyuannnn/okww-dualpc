@@ -19,6 +19,7 @@
 ## Build delivery and publication
 
 - Build and validate packages locally first. After every completed build, provide the version and clickable absolute paths to the standard package, personal package and installed executable when available.
+- After local validation, update the personal installation targeted by the desktop shortcut by default. Keep the shortcut in place, preserve the existing profile, and verify the installed version and profile before reporting delivery.
 - Wait for an explicit publication command for that build before pushing to GitHub, creating or pushing tags, uploading release assets, or publishing a release. Approval for an earlier build does not authorize publication of a later build.
 - Keep existing published versions unchanged unless the user explicitly requests a change or removal.
 

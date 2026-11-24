@@ -197,6 +197,18 @@ impl Host {
         }
         Ok(self.flag(Op::GardenActiveHeading, &[])? && self.flag(Op::GardenActiveStage, &[])?)
     }
+    fn exit_finished_garden(&self) -> Result<bool> {
+        let finish = self.call(Op::ReadGardenFinishButtons, &[])?;
+        if finish[0] == 0. || finish[1] == 0. {
+            return Ok(false);
+        }
+        self.action(Op::Sleep, &[2.])?;
+        self.action(Op::ClickGardenBack, &[1.])?;
+        if self.wait_for(|| self.flag(Op::FindGardenStart, &[]), 5.)? {
+            self.action(Op::Key, &[0., 1.])?;
+        }
+        Ok(true)
+    }
     fn garden_loop(&self) -> Result {
         self.action(Op::ResetGardenCheckedTurn, &[])?;
         self.action(Op::ClearGardenTurnAttempts, &[])?;
@@ -204,6 +216,7 @@ impl Host {
         self.action(Op::SetSpeedChecked, &[-1e12])?;
         let deadline = self.scalar(Op::Now, &[])? + 3600.;
         let mut last_action = self.scalar(Op::Now, &[])?;
+        let remote = self.flag(Op::GardenRemoteCapture, &[])?;
         loop {
             if self.scalar(Op::Now, &[])? > deadline
                 || self.scalar(Op::Now, &[])? - last_action > 180.
@@ -211,6 +224,9 @@ impl Host {
                 return self.fail(501.);
             }
             self.action(Op::Sleep, &[0.1])?;
+            if remote && self.exit_finished_garden()? {
+                return Ok(());
+            }
             self.action(Op::ReadBestGardenFeature, &[])?;
             self.action(Op::Sleep, &[0.2])?;
             if self.flag(Op::BestGardenFeatureExists, &[])? {
@@ -234,8 +250,15 @@ impl Host {
                 if kind == 1. {
                     if self.scalar(Op::ReadGardenNotInterested, &[0.4])? > 0. {
                         self.action(Op::ClickLastGardenNotInterested, &[1.])?;
+                        if remote
+                            && self.wait_for_interval(|| self.flag(Op::FindGardenEventConfirm, &[]), 6., 0.25)?
+                        {
+                            self.action(Op::ClickGardenEventConfirm, &[1.])?;
+                        }
                     }
-                    self.action(Op::ClickGardenFixedFeature, &[1., 1.])?;
+                    if !remote {
+                        self.action(Op::ClickGardenFixedFeature, &[1., 1.])?;
+                    }
                     continue;
                 }
                 if kind == 2. {
@@ -245,13 +268,7 @@ impl Host {
                 }
                 self.action(Op::ClickBestGardenFeature, &[1.])?;
             } else {
-                let finish = self.call(Op::ReadGardenFinishButtons, &[])?;
-                if finish[0] != 0. && finish[1] != 0. {
-                    self.action(Op::Sleep, &[2.])?;
-                    self.action(Op::ClickGardenBack, &[1.])?;
-                    if self.wait_for(|| self.flag(Op::FindGardenStart, &[]), 5.)? {
-                        self.action(Op::Key, &[0., 1.])?;
-                    }
+                if !remote && self.exit_finished_garden()? {
                     return Ok(());
                 }
                 self.action(Op::Sleep, &[0.2])?;

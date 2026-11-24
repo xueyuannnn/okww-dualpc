@@ -887,10 +887,11 @@ struct BackendDispatchSdk {
             b.box_->move(q["x"].toInt(), q["y"].toInt());
             break;
         case rust::WorkflowOp::BackendRpcAbsolute:
-            b.box_->absolute(q["x"].toInt(), q["y"].toInt(), q["width"].toInt(), q["height"].toInt());
+            b.box_->absolute(q["x"].toInt(), q["y"].toInt(), q["width"].toInt(), q["height"].toInt(),
+                             q["game_entry_window"].toString());
             break;
         case rust::WorkflowOp::BackendRpcButton:
-            b.box_->button(q["name"].toString(), q["down"].toBool());
+            b.box_->button(q["name"].toString(), q["down"].toBool(), q["game_entry_window"].toString());
             break;
         case rust::WorkflowOp::BackendRpcKey:
             b.box_->key(q["code"].toInt(), q["down"].toBool());
