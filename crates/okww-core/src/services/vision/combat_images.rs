@@ -95,30 +95,7 @@ impl Host {
             self.action(Op::ConcertoInvalidIndex, &[])?;
             return Err(HOST_ERROR);
         }
-        let width = self.scalar(Op::ConcertoFrameWidth, &[])?;
-        let height = self.scalar(Op::ConcertoFrameHeight, &[])?;
-        let ring = self.call(
-            Op::ConcertoCountRing,
-            &[1500. / 3840. / 2160. * width * height],
-        )?;
-        if ring[1] != 0. {
-            self.action(Op::ConcertoSetFullArea, &[ring[0]])?;
-        }
-        let percent = if ring[1] != 0. {
-            1.
-        } else {
-            let full = self.scalar(Op::ConcertoFullArea, &[])?;
-            if full > 0. {
-                let ratio = ring[0] / full;
-                if ratio < 0.99 {
-                    ratio
-                } else {
-                    0.99
-                }
-            } else {
-                0.
-            }
-        };
+        let percent = self.scalar(Op::ConcertoCountRing, &[])?;
         self.action(Op::ConcertoSetCurrent, &[percent])?;
         Ok(percent)
     }

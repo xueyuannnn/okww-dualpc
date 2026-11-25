@@ -1,12 +1,13 @@
-# 0.2.0-beta.33
+# 0.2.0-beta.44
 
 [首次安装：下载固定环境包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/environment-win10-11-x64-67a1e8aae098) · [安装与更新说明](https://github.com/xueyuannnn/okww-dualpc/blob/main/docs/usage.md#软件更新)
 
-- 正常打开程序时请求管理员权限，以便单机 SendInput 操作管理员权限启动的鸣潮。
-- 4C 副本列表在名称列滚动，避开奖励材料横向预览。
-- 适配远程周常的特殊事件选项和确认按钮，支持从结算页恢复。
+- 同步协奏识别、共鸣技能重试、辅助切人和穗波连招修复。
+- 拉海洛方块支持四托盘关卡，并能处理对局中出现的说明页。
+- 新增养成目标刷取。每日任务也可选养成目标补体力进度。
+- 缺少脚本运行库时，诊断记录会列出缺失文件。
 
-首次安装将环境包和下方 `OK-WW-DualPC-update-win10-11-x64.zip` 内的 `OKWW-DualPC-full` 合并到同一目录。已有 beta.17 全量包可退出软件后，将增量包文件覆盖到旧 EXE 所在目录；更新前备份 `native-full-data`。以后可在“关于”中更新，无需逐版安装。
+首次安装将环境包和 `OK-WW-DualPC-update-win10-11-x64.zip` 内的 `OKWW-DualPC-full` 合并到同一目录。已有对应环境的用户可在「关于」直接更新。旧目录缺脚本运行库时，重新解压两个包，再将备份的 `native-full-data` 复制过去。
 
 本版继续使用环境 `win10-11-x64-67a1e8aae098`。`OK-WW-DualPC-source.zip` 是开发源码，校验值见 `SHA256SUMS.txt`。
 

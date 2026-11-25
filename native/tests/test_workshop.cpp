@@ -271,6 +271,16 @@ class WorkshopTests final : public QObject {
             QVERIFY2(reads>0,qPrintable(id));QVERIFY(captures>0);QCOMPARE(actions,0);
         }
     }
+    void incompleteScriptInstallationReportsTheMissingFile() {
+        QTemporaryDir empty;
+        try {
+            scriptManage(empty.path(), empty.path(), {{"op", "list"}});
+            QFAIL("An application without its environment must report the missing runtime");
+        } catch (const ExecutionFailure &error) {
+            QVERIFY(errorText(error).contains("环境包"));
+            QVERIFY(error.details.endsWith(QDir::toNativeSeparators("workshop-engine/runtime/python.exe")));
+        }
+    }
     void requestPreparationInterruptionRestoresBusyStateAndCanRunAgain() {
         QTemporaryDir data;
         seed(data.path());

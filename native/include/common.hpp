@@ -46,6 +46,7 @@ struct Config {
     double d(const QString &p) const { return get(p).toDouble(); }
     int n(const QString &p) const { return int(d(p)); }
     bool b(const QString &p) const { return get(p).toBool(); }
+    bool browserCloud() const { return s("capture.source") == "browser"; }
     void set(const QString &path, const QJsonValue &value);
     void normalizeBox();
     void validateCapture() const;

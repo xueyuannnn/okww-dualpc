@@ -19,7 +19,7 @@ class RestartTracker {
   public:
     RestartAction step(RestartKind kind, bool hud, bool realm);
 };
-void restartBossDomain(TaskContext &context);
+void restartBossDomain(TaskContext &context, const std::function<bool()> &hasEnemyHealth = {});
 bool completedNest(TaskContext &context);
 void leaveNest(TaskContext &context, bool sendEscape = true);
 } // namespace okww::runtime

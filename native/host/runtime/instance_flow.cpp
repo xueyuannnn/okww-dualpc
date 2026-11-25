@@ -218,9 +218,10 @@ RestartAction RestartTracker::step(RestartKind kind, bool hud, bool realm) {
     return RestartAction(rust::okww_rs_restart_step(&state_, int(kind), hud, realm));
 }
 
-void restartBossDomain(TaskContext &c) {
+void restartBossDomain(TaskContext &c, const std::function<bool()> &hasEnemyHealth) {
     Navigation navigation(c);
     RestartDialog dialog;
+    std::optional<uint64_t> requestedFrame;
     rust::workflowRun(rust::WorkflowMethod::RestartBoss, {},
                       [&](rust::WorkflowOp op, const double *a, double *out) {
                           switch (op) {
@@ -247,6 +248,11 @@ void restartBossDomain(TaskContext &c) {
                               out[0] = navigation.inRealm();
                               break;
                           }
+                          case rust::WorkflowOp::EchoHasHealthBar: {
+                              out[0] = hasEnemyHealth && requestedFrame && c.frameVersion != *requestedFrame &&
+                                       hasEnemyHealth();
+                              break;
+                          }
                           case rust::WorkflowOp::HasInfo: {
                               out[0] = bool(c.info);
                               break;
@@ -260,6 +266,10 @@ void restartBossDomain(TaskContext &c) {
                               break;
                           }
                           case rust::WorkflowOp::ClickRestartButton: {
+                              if (dialog.kind == RestartKind::Resource)
+                                  requestedFrame.reset();
+                              else
+                                  requestedFrame = c.frameVersion;
                               c.click(*dialog.button, a[0]);
                               break;
                           }

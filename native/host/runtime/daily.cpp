@@ -1,5 +1,6 @@
 #include "daily.hpp"
 #include "diagnostics.hpp"
+#include "scripts.hpp"
 #include "workflow_abi.hpp"
 namespace okww::runtime {
 namespace {
@@ -927,7 +928,26 @@ int dailyStaminaBatch(int progress, int cost, int available, bool preferDouble) 
                                  })[0]);
 }
 
-void Daily::completeStamina() { rustActions(int(rust::WorkflowMethod::DailyCompleteStamina), {}); }
+void Daily::completeStamina() {
+    if (config_["Which to Farm"] != "Cultivation Target") {
+        rustActions(int(rust::WorkflowMethod::DailyCompleteStamina), {});
+        return;
+    }
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const auto before = open();
+        if (before.ready() || before.stamina.value_or(-1) >= 180)
+            return;
+        if (!before.stamina)
+            observationFailure("未确认每日体力进度，无法设定养成刷取上限");
+        if (!runCultivationActivity(c_, combat_, root_, data_, 60))
+            return;
+        const auto after = claim();
+        if (after.ready() || after.stamina.value_or(-1) >= 180)
+            return;
+        if (!after.stamina || *after.stamina <= *before.stamina)
+            observationFailure("养成奖励已领取，未确认每日体力进度增加");
+    }
+}
 void Daily::farmCount(DomainKind kind) {
     rustActions(int(rust::WorkflowMethod::DailyFarmCount), {double(int(kind))});
 }

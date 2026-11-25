@@ -35,7 +35,8 @@ class Navigation {
     void healAtBeacon();
     void startChallenge();
     void waitTravel();
-    bool selectBookEntry(int serial, int total, const QVector<int> &structure = {}, bool fromEnd = false);
+    bool selectBookEntry(int serial, int total, const QVector<int> &structure = {}, bool fromEnd = false,
+                         const QString &expectedCategory = {});
 };
 QString normalizeNavigationText(const QString &value);
 double bookScrollPosition(int serial, int total, const QVector<int> &structure, double top);

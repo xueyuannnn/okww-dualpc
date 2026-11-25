@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include "desktop.hpp"
 namespace okww {
+class CloudBrowser;
 class LocalInputBlocked : public std::runtime_error {
   public:
     enum class Recovery { Wait, DismissRunDialog };
@@ -15,6 +16,7 @@ class Controller {
     friend struct ControllerInputSdk;
     friend struct ControllerLocalSdk;
     Config cfg_;
+    std::shared_ptr<CloudBrowser> browser_;
     SOCKET socket_ = INVALID_SOCKET;
     std::recursive_mutex mutex_;
     uint32_t index_ = 0, uuid_ = 0;
@@ -38,8 +40,8 @@ class Controller {
     void keyboardReport();
 
   public:
-    explicit Controller(Config c, std::function<QJsonObject()> localEnvironment = {})
-        : cfg_(std::move(c)), localEnvironment_(std::move(localEnvironment)) {}
+    explicit Controller(Config c, std::function<QJsonObject()> localEnvironment = {}, std::shared_ptr<CloudBrowser> browser = {})
+        : cfg_(std::move(c)), browser_(std::move(browser)), localEnvironment_(std::move(localEnvironment)) {}
     ~Controller() { close(); }
     void connect();
     void close() noexcept;

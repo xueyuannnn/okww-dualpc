@@ -38,6 +38,7 @@ class CombatSession final : public CombatHost {
     bool physicalFWasDown_ = false, pendingMacroReset_ = false;
     uint64_t enabledRevision_ = 0;
     int combatCount_ = 0;
+    int supportHandoffTarget_ = -1;
     int targetEscCount_ = 0;
     uint64_t checkedVersion_ = UINT64_MAX;
     double lastInterval_ = 0, lastDeathCheck_ = 0, lastBreakCheck_ = 0, lastHealthCheck_ = -1;
@@ -51,6 +52,7 @@ class CombatSession final : public CombatHost {
     bool interval(double seconds);
     void watchdog();
     bool healthBar();
+    bool echoFinishAssist() const { return context_.task == "FarmEchoTask" || context_.task == "FarmEchoTask2"; }
     bool targetEnemy();
     bool checkBreak() override;
     void updatePortraits();

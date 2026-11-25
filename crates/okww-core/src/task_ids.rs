@@ -15,6 +15,7 @@ pub fn kind(id: &[u8]) -> i32 {
         b"ChangeEchoTask" => 12,
         b"GalGameTask" => 13,
         b"RahaiBlocksTask" => 14,
+        b"CultivationTask" => 15,
         _ => -1,
     }
 }

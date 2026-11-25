@@ -53,8 +53,16 @@ impl Host {
             }
             let kind = self.scalar(Op::ReadRestartDialog, &[])? as i32;
             let hud = self.flag(Op::InTeam, &[])?;
-            let action = tracker.step(kind, hud, hud && self.flag(Op::NavInRealm, &[])?);
-            if action == 4 {
+            let realm = hud && self.flag(Op::NavInRealm, &[])?;
+            let action = tracker.step(kind, hud, realm);
+            // A fast restart can skip the frames where the party HUD is hidden.
+            if action == 4
+                || (action == 0
+                    && tracker.requested != 0
+                    && kind == 0
+                    && realm
+                    && self.flag(Op::EchoHasHealthBar, &[])?)
+            {
                 if self.flag(Op::HasInfo, &[])? {
                     self.action(Op::RestartCompleteInfo, &[])?;
                 }

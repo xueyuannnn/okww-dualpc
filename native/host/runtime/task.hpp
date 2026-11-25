@@ -43,13 +43,14 @@ class TaskContext {
     QString task;
     QString gameLanguage = "zh_CN";
     bool streamedCapture = false;
+    bool browserCapture = false;
     bool localDesktopGame = false;
     QString desktopRecognitionMode = "local";
     QJsonObject recognitionEnvironment;
     std::function<QJsonObject()> desktopEnvironment;
     void observeDesktopImage(const QJsonObject &environment);
     QJsonObject partyObservation;
-    bool cloudGame() const { return profile.value("Cloud Game", "Enabled", false).toBool(); }
+    bool cloudGame() const { return browserCapture; }
     bool streamedImage() const {
         return ((streamedCapture && !localDesktopGame) || cloudGame()) && profile.value("Cloud Game", "Compressed Image Tolerance", true).toBool();
     }

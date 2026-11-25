@@ -144,10 +144,35 @@ class CombatImageContracts : public QObject {
             const auto actual = failure([&] { y = candidate.detect(frame, b); });
             QCOMPARE(actual, expected);
             QCOMPARE(a.ringIndex, b.ringIndex);
-            QVERIFY(same(a.currentCon, b.currentCon));
-            QVERIFY(same(x, y));
+            if (actual.isEmpty()) {
+                QVERIFY(y >= 0. && y <= 1.);
+                QCOMPARE(b.currentCon, y);
+            }
             for (int i = 0; i < 6; ++i)
-                QVERIFY(same(old.fullAreas()[i], candidate.fullAreas()[i]));
+                QVERIFY(same(areas[i], candidate.fullAreas()[i]));
+        }
+    }
+    void concertoCoverageDoesNotNeedCalibration() {
+        for (const int width : {1920, 2560, 3840}) {
+            const int height = width * 9 / 16;
+            cv::Mat frame(height, width, CV_8UC3, cv::Scalar());
+            const auto box = Concerto::region({width, height});
+            auto crop = frame(cv::Rect(box.x(), box.y(), box.width(), box.height()));
+            const cv::Point center(crop.cols / 2, crop.rows / 2);
+            const int radius = qRound(crop.rows * .386);
+            const int stroke = qRound(crop.rows * .09);
+            const auto color = (concertoColors()[0].lower + concertoColors()[0].upper) * .5;
+            const std::array<double, 6> prior{2000., 0., 0., 0., 0., 0.};
+            Concerto detector(prior);
+            CharacterState state;
+            state.ringIndex = 0;
+            QCOMPARE(detector.detect(frame, state), 0.);
+            cv::ellipse(crop, center, {radius, radius}, 0, 0, 310, color, stroke);
+            const auto partial = detector.detect(frame, state);
+            QVERIFY(partial > .75 && partial < .95);
+            cv::circle(crop, center, radius, color, stroke);
+            QCOMPARE(detector.detect(frame, state), 1.);
+            QCOMPARE(detector.fullAreas()[0], 2000.);
         }
     }
     void gauges_data() {

@@ -33,6 +33,19 @@ class ControllerInputContracts final : public QObject {
             QCOMPARE(QPoint(actual[0], actual[1]), expected);
         }
     }
+    void recognitionPointFollowsTheResizedWindowClientArea() {
+        const QSize recognition(1920, 1080);
+        const QPoint point(480, 810);
+        for (const QRect client : {QRect(300, 50, 1280, 720), QRect(-1700, 40, 1600, 900),
+                                   QRect(120, 80, 2560, 1440), QRect(0, 0, 3840, 2160)}) {
+            std::array<int32_t, 2> mapped{};
+            QVERIFY(rust::okww_rs_controller_map_point(point.x(), point.y(), recognition.width(),
+                                                       recognition.height(), client.x(), client.y(),
+                                                       client.width(), client.height(), mapped.data()));
+            QCOMPARE(QPoint(mapped[0], mapped[1]),
+                     client.topLeft() + QPoint(client.width() / 4, client.height() * 3 / 4));
+        }
+    }
 };
 QTEST_GUILESS_MAIN(ControllerInputContracts)
 #include "test_controller_input_contract.moc"

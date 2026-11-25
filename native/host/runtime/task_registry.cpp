@@ -10,7 +10,8 @@ QVector<TaskDefinition> businessTasks(const std::function<bool(const QString &)>
                             "FarmEchoTask",    "FarmEchoTask2",        "NightmareNestTask", "TacetTask",
                             "TacetTask2",      "ForgeryTask",          "ForgeryTask2",      "SimulationTask",
                             "SimulationTask2", "MergeEchoTask",        "EnhanceEchoTask",   "ChangeEchoTask",
-                            "GardenTask",      "MultiAccountDailyTask", "GalGameTask", "RahaiBlocksTask"};
+                            "GardenTask",      "MultiAccountDailyTask", "GalGameTask", "RahaiBlocksTask",
+                            "CultivationTask"};
     QString current;
     QVector<TaskDefinition> result;
     rust::workflowRun(
@@ -128,6 +129,10 @@ bool TaskRunner::dispatch(const QString &id) {
                 Garden(c_, root_).run();
                 break;
             case rust::WorkflowOp::DispatchPythonActivity: {
+                if (id == "CultivationTask") {
+                    runCultivationActivity(c_, combat_, root_, data_);
+                    break;
+                }
                 ScriptRuntime activity(c_, root_, data_, true);
                 activity.builtin = [&](const QString &task) { return dispatch(task); };
                 activity.run({{"id", "activity:" + id}, {"fields", QJsonArray{}}});

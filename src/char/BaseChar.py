@@ -9,6 +9,7 @@ from ok import Config, Logger  # noqa
 from src import text_white_color  # noqa
 
 SKILL_TIME_OUT = 15
+RESONANCE_STILL_READY_TIMEOUT = 2
 
 
 class CharType(StrEnum):
@@ -432,6 +433,8 @@ class BaseChar:
             if not self.resonance_available() and (
                     not has_animation or now - start > animation_min_duration):
                 self.logger.debug(f'click_resonance not available break')
+                break
+            if not time_out and not has_animation and clicked and now - resonance_click_time >= RESONANCE_STILL_READY_TIMEOUT:
                 break
             self.logger.debug(f'click_resonance resonance_available click')
 

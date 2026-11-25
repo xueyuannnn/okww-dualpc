@@ -20,7 +20,7 @@ impl Host {
         self.action(Op::SelectEchoBookCategory, &[feature])?;
         let team = self.flag(
             Op::SelectEchoBookEntry,
-            &[serial, total, special as u8 as f64],
+            &[serial, total, special as u8 as f64, feature],
         )?;
         if team {
             if category == 0 {

@@ -1,9 +1,22 @@
 #include "scripts.hpp"
+#include "combat_session.hpp"
 #include "diagnostics.hpp"
 #include "workflow_abi.hpp"
 #include "workshop.hpp"
 namespace okww::runtime {
 namespace {
+QString checkedScriptProgram(const QString &root, const QString &engine, const QString &entry) {
+    const auto python = workshopPython(root);
+    const auto script = engine + "/workshop/bridge/" + entry;
+    if (!python.isEmpty() && QFileInfo(script).isFile())
+        return python;
+
+    const auto missing = python.isEmpty() ? root + "/workshop-engine/runtime/python.exe" : script;
+    throw ExecutionFailure(
+        "Python 脚本环境不完整。请保留 native-full-data，完整解压环境包，再把同环境的应用更新包解压到同一目录。",
+        "Missing script runtime component: " + QDir::toNativeSeparators(missing));
+}
+
 [[noreturn]] void scriptFailure(int code, const QJsonObject &reply = {}, const QByteArray &errors = {}) {
     switch (code) {
     case 3:
@@ -78,8 +91,8 @@ QJsonObject scriptManage(const QString &root, const QString &data, QJsonObject r
         rust::WorkflowMethod::ScriptManage, {}, [&](rust::WorkflowOp op, const double *a, double *out) {
             switch (op) {
             case rust::WorkflowOp::ScriptResolveRuntime:
-                python = workshopPython(root);
                 engine = workshopRoot(root);
+                python = checkedScriptProgram(root, engine, "script_manager.py");
                 break;
             case rust::WorkflowOp::ScriptPythonEmpty:
                 out[0] = python.isEmpty();
@@ -500,8 +513,8 @@ QJsonObject ScriptRuntime::rustScript(int method, QJsonObject request, QJsonObje
                 process_.waitForReadyRead(int(a[0]));
                 break;
             case rust::WorkflowOp::ScriptResolveRuntime:
-                python = workshopPython(root_);
                 engine = workshopRoot(root_);
+                python = checkedScriptProgram(root_, engine, "script_worker.py");
                 break;
             case rust::WorkflowOp::ScriptPythonEmpty:
                 out[0] = python.isEmpty();
@@ -603,5 +616,30 @@ void ScriptRuntime::start() { rustScript(int(rust::WorkflowMethod::ScriptStart))
 QJsonObject ScriptRuntime::run(const QJsonObject &script, std::function<bool()> enabled) {
     enabled_ = std::move(enabled);
     return rustScript(int(rust::WorkflowMethod::ScriptRun), {}, script);
+}
+int runCultivationActivity(TaskContext &context, CombatSession &combat, const QString &root,
+                           const QString &data, std::optional<int> dailyBudget) {
+    constexpr int claimCost = 60;
+    QJsonObject config = context.profile.group("CultivationTask");
+    if (dailyBudget)
+        config["Daily Waveplate Budget"] = *dailyBudget;
+    QJsonArray fields;
+    for (auto it = config.constBegin(); it != config.constEnd(); ++it)
+        fields.append(QJsonObject{{"key", it.key()}, {"value", it.value()}});
+    ScriptRuntime activity(context, root, data, true);
+    activity.builtin = [&](const QString &id) {
+        if (id != "CultivationTask")
+            fail("养成任务请求了未知的战斗流程");
+        try {
+            return combat.combatOnce({.waitSeconds = 30, .target = true, .maximumSeconds = 600});
+        } catch (const CombatEnded &) {
+            return false;
+        }
+    };
+    const auto result = activity.run({{"id", "activity:CultivationTask"}, {"fields", fields}});
+    const int spent = result["spent_waveplates"].toInt(-1);
+    if (spent < 0 || spent % claimCost != 0 || (dailyBudget && spent > *dailyBudget))
+        fail("未确认养成任务实际消耗的结晶波片");
+    return spent;
 }
 } // namespace okww::runtime

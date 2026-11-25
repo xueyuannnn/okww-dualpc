@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
             const auto config = Config::load(path);
             config.validateCapture();
             QJsonArray available;
-            if (config.s("capture.source") != "desktop") for (const auto &mode : modes(config))
+            if (config.s("capture.source") == "card") for (const auto &mode : modes(config))
                 if (mode.width == config.n("capture.width") && mode.height == config.n("capture.height") &&
                     mode.fourcc == config.s("capture.fourcc"))
                     available.append(mode.json());
@@ -183,6 +183,7 @@ int main(int argc, char **argv) {
                 TaskContext context(execution,input,templates,profile,[&] { return image; },
                     [&](const auto &frame,auto area,double threshold) { return ocr->read(frame,area,threshold); });
                 context.streamedCapture = parser.isSet("streamed") || parser.isSet("local-game");
+                context.browserCapture = parser.isSet("cloud");
                 if(parser.isSet("local-game")) {
                     context.desktopRecognitionMode="local";context.observeDesktopImage({});
                 }
@@ -236,7 +237,6 @@ int main(int argc, char **argv) {
                 Templates templates(root + "/assets/coco_annotations.json");
                 QTemporaryDir directory;
                 Profile profile(directory.path(), root + "/native/resources/catalog.json");
-                if (parser.isSet("cloud")) profile.set("Cloud Game", "Enabled", true);
                 SteadyClock clock;
                 ExecutionGate gate;
                 Execution execution(gate, gate.start(), clock);
@@ -258,6 +258,7 @@ int main(int argc, char **argv) {
                 context.refresh();
                 CombatVision vision(context, root + "/native/resources/characters.json");
                 context.streamedCapture = parser.isSet("streamed") || parser.isSet("local-game");
+                context.browserCapture = parser.isSet("cloud");
                 if(parser.isSet("local-game")) {
                     context.desktopRecognitionMode="local";context.observeDesktopImage({});
                 }
@@ -293,6 +294,7 @@ int main(int argc, char **argv) {
                 combat["health"] = vision.healthBar(false);
                 combat["health_in_combat"] = vision.healthBar(true);
                 combat["shifted_health"] = vision.shiftedHealthBar();
+                combat["low_boss_health"] = vision.lowBossHealth();
                 combat["death_dialog"] = vision.deathDialog();
                 combat["system_run_dialog"] = systemRunDialogConfirmed(context.text(0,.7,.35,1,.65));
                 const auto result = vision.challengeResult();

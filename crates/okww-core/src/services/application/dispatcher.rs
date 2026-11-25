@@ -88,7 +88,7 @@ impl Host {
                     10 => self.action(Op::DispatchMergeEcho, &[])?,
                     11 => self.action(Op::DispatchEnhanceEcho, &[])?,
                     12 => self.action(Op::DispatchChangeEcho, &[])?,
-                    13..=14 => self.action(Op::DispatchPythonActivity, &[])?,
+                    13..=15 => self.action(Op::DispatchPythonActivity, &[])?,
                     _ => {
                         self.action(Op::UnknownBusinessTask, &[])?;
                         return Err(HOST_ERROR);

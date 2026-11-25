@@ -7,7 +7,9 @@ impl Host {
             self.action(Op::DesktopRunFailure, &[1.])?;
             return Err(HOST_ERROR);
         }
-        if !self.flag(Op::DesktopRunSameSize, &[])? {
+        if !self.flag(Op::DesktopRunSameSize, &[])?
+            && !self.flag(Op::DesktopRunCanResizeWindow, &[])?
+        {
             self.action(Op::DesktopRunFailure, &[2.])?;
             return Err(HOST_ERROR);
         }

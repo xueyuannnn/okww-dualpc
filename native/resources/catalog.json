@@ -2490,22 +2490,8 @@
         {
             "id": "Cloud Game",
             "name": "云游戏与远程画面",
-            "description": "浏览器云游戏使用 DXGI 与 SendInput，保持 16:9 全屏。远程画面容错也适用于远程软件。",
+            "description": "网页云游戏在双机设置中选择，独立读取网页视频并发送网页键鼠。这里可调整云游戏识别参数。",
             "fields": [
-                {
-                    "key": "Enabled",
-                    "label": "浏览器云游戏模式",
-                    "value": false,
-                    "kind": "boolean",
-                    "description": "云·鸣潮专用目标识别与断线处理；采集卡和远程游戏客户端无需开启。"
-                },
-                {
-                    "key": "Open Browser",
-                    "label": "云·鸣潮网页",
-                    "value": false,
-                    "kind": "cloud_launch",
-                    "description": "优先使用 Edge，以 1080p 全屏和 SDR 色彩打开；需自行登录。"
-                },
                 {
                     "key": "Compressed Image Tolerance",
                     "label": "压缩画面识别容错",
@@ -3331,12 +3317,14 @@
                     "option_labels": [
                         "无音区",
                         "凝素领域",
-                        "模拟领域"
+                        "模拟领域",
+                        "养成目标"
                     ],
                     "options": [
                         "Tacet Suppression",
                         "Forgery Challenge",
-                        "Simulation Challenge"
+                        "Simulation Challenge",
+                        "Cultivation Target"
                     ],
                     "sub_config": false,
                     "value": "Tacet Suppression"
@@ -4447,6 +4435,42 @@
             "enabled": false,
             "support_schedule": false,
             "fields": []
+        },
+        {
+            "id": "CultivationTask",
+            "name": "养成目标刷取",
+            "description": "按索拉指南的培养目标刷突破和技能材料，可继续刷声骸套装及对应聚落。支持简体中文、16:9 画面。",
+            "trigger": false,
+            "enabled": false,
+            "support_schedule": true,
+            "fields": [
+                {
+                    "key": "Ascension Materials",
+                    "kind": "boolean",
+                    "label": "共鸣者突破材料",
+                    "value": true
+                },
+                {
+                    "key": "Skill Materials",
+                    "kind": "boolean",
+                    "label": "技能升级材料",
+                    "value": true
+                },
+                {
+                    "key": "Echo Set Tacet Suppression",
+                    "kind": "boolean",
+                    "label": "刷目标声骸套装",
+                    "description": "材料达到目标或本周领取次数用尽后，用剩余结晶波片刷培养页里的无音区。",
+                    "value": true
+                },
+                {
+                    "key": "Echo Set Nightmare Nest",
+                    "kind": "boolean",
+                    "label": "清理目标声骸聚落",
+                    "description": "单独运行养成任务时，清理培养页指定的聚落，不消耗结晶波片。",
+                    "value": true
+                }
+            ]
         }
     ],
     "teams": []

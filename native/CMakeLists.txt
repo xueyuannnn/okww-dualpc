@@ -21,14 +21,14 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Network Concurrent Tes
 enable_testing()
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../tests/parity/fixtures/cpp")
 include(cmake/RustCore.cmake)
-add_library(okww_native STATIC platform/common.cpp platform/capture.cpp platform/capture_desktop.cpp platform/desktop.cpp platform/controller.cpp platform/backend.cpp platform/update.cpp platform/update.hpp)
+add_library(okww_native STATIC platform/common.cpp platform/capture.cpp platform/capture_desktop.cpp platform/browser_cloud.cpp platform/desktop.cpp platform/controller.cpp platform/backend.cpp platform/update.cpp platform/update.hpp)
 target_include_directories(okww_native PUBLIC
     include platform ui host
     "${CMAKE_CURRENT_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/../crates/okww-core/abi")
 target_compile_definitions(okww_native PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_compile_options(okww_native PUBLIC /utf-8 /W4 /permissive- /EHsc)
-target_link_libraries(okww_native PUBLIC Qt6::Core Qt6::Gui Qt6::Network ws2_32 ole32 oleaut32 strmiids mfplat mfreadwrite mfuuid mf windowsapp d3d11 dxgi user32 gdi32)
+target_link_libraries(okww_native PUBLIC Qt6::Core Qt6::Gui Qt6::Network ws2_32 winhttp ole32 oleaut32 strmiids mfplat mfreadwrite mfuuid mf windowsapp d3d11 dxgi user32 gdi32)
 target_link_libraries(okww_native PUBLIC okww_rust_core ntdll userenv bcrypt advapi32)
 option(OKWW_BUILD_COMPAT "Build the retained Python compatibility host" OFF)
 if(OKWW_BUILD_COMPAT)

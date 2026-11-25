@@ -1,5 +1,6 @@
 #include "backend.hpp"
 #include "backend_capture_fixture.hpp"
+#include "browser_cloud.hpp"
 #include "windows_compat.hpp"
 #include "desktop.hpp"
 #include <future>
@@ -9,12 +10,85 @@ using namespace okww;
 class NativeTests : public QObject {
     Q_OBJECT
   private slots:
+    void browserSelectionFollowsWindowsOrExplicitChoice() {
+        QCOMPARE(cloudBrowserChoice("auto", "ChromeHTML", true, true), QString("chrome"));
+        QCOMPARE(cloudBrowserChoice("auto", "MSEdgeHTM", true, true), QString("edge"));
+        QCOMPARE(cloudBrowserChoice("auto", "UnknownBrowser", true, true), QString("chrome"));
+        QCOMPARE(cloudBrowserChoice("chrome", "MSEdgeHTM", true, true), QString("chrome"));
+        QCOMPARE(cloudBrowserChoice("edge", "ChromeHTML", true, true), QString("edge"));
+        QVERIFY(cloudBrowserChoice("chrome", "MSEdgeHTM", false, true).isEmpty());
+        QCOMPARE(cloudBrowserChoice("auto", "ChromeHTML", false, true), QString("edge"));
+    }
+    void browserCaptureToleratesShortGapsButRejectsStaleFrames() {
+        auto config = Config::defaults();
+        config.set("capture.source", "browser");
+        BackendCaptureFixture cloud(config);
+        BackendCaptureFixture card;
+        cloud.publish(280);
+        card.publish(280);
+        QVERIFY(cloud.backend.latestFrame());
+        QVERIFY(!card.backend.latestFrame());
+        cloud.publish(1200);
+        QVERIFY(!cloud.backend.latestFrame());
+    }
+    void cloudBrowserReusesExistingPagesAndOpensAtMostOnceDuringStartup() {
+        QCOMPARE(cloudPageAction(true, true, false, false), CloudPageAction::Reuse);
+        QCOMPARE(cloudPageAction(true, true, true, true), CloudPageAction::Reuse);
+        QCOMPARE(cloudPageAction(true, false, true, false), CloudPageAction::OpenTab);
+        QCOMPARE(cloudPageAction(true, false, true, true), CloudPageAction::Wait);
+        QCOMPARE(cloudPageAction(false, false, true, false), CloudPageAction::Wait);
+        QCOMPARE(cloudPageAction(false, false, false, true), CloudPageAction::Wait);
+        QCOMPARE(cloudPageAction(false, false, false, false), CloudPageAction::Launch);
+    }
+
+    void legacyForegroundCloudProfileMigratesToTheDedicatedBrowser() {
+        auto profile = Config::defaults();
+        profile.set("capture.source", "desktop");
+        profile.set("capture.recognition_mode", "cloud_window");
+        profile.set("capture.cloud_window_target", QJsonObject{{"kind", "window"}, {"hwnd", "100"}});
+        profile.set("capture.cloud_background", false);
+        profile.set("capture.cloud_browser", "chrome");
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto path = directory.filePath("dualpc.json");
+        writeJson(path, profile.json);
+        const auto config = Config::load(path);
+        QVERIFY(config.browserCloud());
+        QCOMPARE(config.s("capture.cloud_browser"), QString("chrome"));
+        QVERIFY(config.get("capture.cloud_window_target").isUndefined());
+        QVERIFY(config.get("capture.cloud_background").isUndefined());
+        QCOMPARE(config.s("kmbox.protocol"), QString("kmbox_net"));
+    }
+
     void dxgiWindowSelectionIsSharedByCaptureAndInput() {
         auto config=Config::defaults();config.set("capture.source","desktop");config.set("capture.local_backend","DXGI");
         const QJsonObject identity{{"kind","window"},{"hwnd","12345"},{"pid",987},
             {"exe","C:/Games/Client-Win64-Shipping.exe"},{"title","test game"},{"class","UnrealWindow"}};
         config.set("capture.local_target",identity);
         QCOMPARE(desktopCaptureTarget(config),identity);
+    }
+    void localWindowsCanResizeAcrossSupportedResolutions() {
+        auto config = Config::defaults();
+        config.set("capture.source", "desktop");
+        config.set("capture.local_target", QJsonObject{{"kind", "window"}});
+        const QSize moderate(1920, 1080);
+        for (const auto &backend : {"DXGI", "WIN32"}) {
+            config.set("capture.local_backend", backend);
+            for (const QSize size : {QSize(1280, 720), QSize(1600, 900), moderate,
+                                     QSize(2560, 1440), QSize(3840, 2160)})
+                QVERIFY(canResizeLocalGameWindow(config, moderate, size));
+        }
+        QVERIFY(!canResizeLocalGameWindow(config, moderate, {3440, 1440}));
+        QVERIFY(!canResizeLocalGameWindow(config, moderate, {1920, 1200}));
+        QVERIFY(!canResizeLocalGameWindow(config, moderate, {1024, 576}));
+        config.set("capture.crop", QJsonArray{0, 0, 1280, 720});
+        QVERIFY(!canResizeLocalGameWindow(config, moderate, {1600, 900}));
+        config.set("capture.crop", QJsonValue());
+        config.set("capture.recognition_mode", "remote");
+        QVERIFY(!canResizeLocalGameWindow(config, moderate, {1600, 900}));
+        config.set("capture.recognition_mode", "local");
+        config.set("capture.local_target", QJsonObject{});
+        QVERIFY(!canResizeLocalGameWindow(config, moderate, {1600, 900}));
     }
     void resumedTaskHeartbeatRecoversWithoutReplayingReleasedKeys() {
         Backend backend(false);backend.start(Config::defaults(),true);backend.arm(true);

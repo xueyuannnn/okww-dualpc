@@ -21,6 +21,8 @@ impl Host {
         if self.bool(Bool::InLiberation)? {
             return Ok(true);
         }
+        let echo_farm = self.flag(Op::EchoFinishAssist, &[])?;
+        let local = self.flag(Op::LocalDesktopGame, &[])?;
         if self.bool(Bool::Engaged)? {
             if self.flag(Op::CheckedVersionMatches, &[])? {
                 return Ok(true);
@@ -58,16 +60,35 @@ impl Host {
                 return Ok(false);
             }
             if self.flag(Op::TargetLocked, &[])? {
-                if self.flag(Op::CloudMode, &[])? || self.flag(Op::StreamedImage, &[])? {
+                if echo_farm
+                    || local
+                    || self.flag(Op::CloudMode, &[])?
+                    || self.flag(Op::StreamedImage, &[])?
+                {
                     self.action(Op::SetLastHealthSeen, &[self.now()?])?;
                 }
                 self.action(Op::SetCheckedVersionFrame, &[])?;
                 return Ok(true);
             }
-            if self.flag(Op::StreamedImage, &[])? && self.flag(Op::SessionHealthBar, &[])? {
+            if (echo_farm || local || self.flag(Op::StreamedImage, &[])?)
+                && self.flag(Op::SessionHealthBar, &[])? {
                 self.action(Op::SetLastHealthSeen, &[self.now()?])?;
                 self.action(Op::SetCheckedVersionFrame, &[])?;
                 return Ok(true);
+            }
+            if echo_farm || local {
+                let last = self.call(Op::LastHealthSeen, &[])?;
+                let grace = if echo_farm { 1.4 } else { 0.8 };
+                if last >= 0. && self.now()? - last < grace {
+                    if self.flag(Op::HasEndCondition, &[])? && self.flag(Op::EndCondition, &[])? {
+                        self.action(Op::ReleaseInput, &[])?;
+                        self.action(Op::ResetCombat, &[])?;
+                        return Ok(false);
+                    }
+                    // Recheck time even on an unchanged frame. Only a real
+                    // target or health bar can renew this hold.
+                    return Ok(true);
+                }
             }
             if self.flag(Op::CloudMode, &[])? {
                 let last = self.call(Op::LastHealthSeen, &[])?;
@@ -95,12 +116,21 @@ impl Host {
                 self.action(Op::ResetCombat, &[])?;
                 return Ok(false);
             }
-            if self.flag(Op::TargetEnemy, &[])? {
+            let retarget = !local
+                || !self.flag(Op::AutoTask, &[])?
+                || self.flag(Op::AutoTargetSetting, &[])?;
+            if retarget && self.flag(Op::TargetEnemy, &[])? {
+                if local {
+                    self.action(Op::SetLastHealthSeen, &[self.now()?])?;
+                }
                 self.action(Op::SetCheckedVersionFrame, &[])?;
                 return Ok(true);
             }
             if self.flag(Op::MonthlyCard, &[])? {
                 return Ok(true);
+            }
+            if local {
+                self.action(Op::ReleaseInput, &[])?;
             }
             self.action(Op::ResetCombat, &[])?;
             return Ok(false);
@@ -117,6 +147,9 @@ impl Host {
         }
         if !target && !self.flag(Op::TargetEnemy, &[])? {
             return Ok(false);
+        }
+        if echo_farm || local {
+            self.action(Op::SetLastHealthSeen, &[self.now()?])?;
         }
         self.set_bool(Bool::HasLevitator, self.flag(Op::LevitatorFeature, &[])?)?;
         self.set_bool(Bool::Engaged, true)?;

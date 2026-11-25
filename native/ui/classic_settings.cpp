@@ -1,24 +1,6 @@
 #include "window.hpp"
 #include <QDesktopServices>
-#include <QSettings>
 namespace okww {
-void Window::openCloudGame() {
-    QStringList candidates;
-    QSettings user("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe", QSettings::NativeFormat);
-    QSettings machine("HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe", QSettings::NativeFormat);
-    candidates << user.value(".").toString() << machine.value(".").toString();
-    for (const auto &variable : {"ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"})
-        candidates << qEnvironmentVariable(variable) + "/Microsoft/Edge/Application/msedge.exe";
-    const QStringList arguments{"--app=https://mc.kurogames.com/cloud/#/", "--window-size=1920,1080",
-        "--start-fullscreen", "--force-color-profile=srgb", "--disable-direct-composition",
-        "--webrtc-ip-handling-policy=default"};
-    for (const auto &path : candidates)
-        if (QFile::exists(path) && QProcess::startDetached(path, arguments)) return;
-    // Other default browsers can open the page; colour/compositor flags require Edge.
-    QDesktopServices::openUrl(QUrl("https://mc.kurogames.com/cloud/#/"));
-    QMessageBox::information(this, "云·鸣潮", "未找到 Microsoft Edge，已用默认浏览器打开网页。请手动开启 16:9 全屏，并关闭浏览器 HDR。登录后再启动任务。");
-}
-
 void Window::editAccountProfiles(QJsonArray profiles, std::function<void(QJsonValue)> changed) {
     auto dialog = new QDialog(this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);

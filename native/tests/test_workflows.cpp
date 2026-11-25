@@ -195,6 +195,53 @@ class WorkflowTests : public QObject {
             s.show("world"); QVERIFY(vision.healthBar(true));
         }
     }
+    void echoFinishingKeepsAConfirmedSliverAndExpiresOnAnUnchangedFrame_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("dxgi-local") << QString("local");
+        QTest::newRow("dxgi-remote") << QString("remote");
+        QTest::newRow("capture-card") << QString("card");
+    }
+    void echoFinishingKeepsAConfirmedSliverAndExpiresOnAnUnchangedFrame() {
+        QFETCH(QString, mode);
+        Scenes s;
+        s.c.task = mode == "card" ? "FarmEchoTask" : "FarmEchoTask2";
+        s.c.streamedCapture = mode != "card";
+        s.c.localDesktopGame = mode == "local";
+        s.frame("locked", {"has_target", "char_2_text", "char_3_text"});
+        s.frame("low", {"no_target", "char_2_text", "char_3_text"});
+        cv::rectangle(s.frames["low"], {680, 56, 7, 10}, cv::Scalar(60, 175, 234), cv::FILLED);
+        if (mode == "remote") {
+            cv::Mat small;
+            cv::resize(s.frames["low"], small, {1280, 720}, 0, 0, cv::INTER_AREA);
+            std::vector<uchar> encoded;
+            cv::imencode(".jpg", small, encoded, {cv::IMWRITE_JPEG_QUALITY, 42});
+            cv::resize(cv::imdecode(encoded, cv::IMREAD_COLOR), s.frames["low"], {1920, 1080});
+        }
+        s.words["low"] = {s.word("Lv. 90 Boss", .44, .014, .12, .025)};
+        s.frames["no-title"] = s.frames["low"].clone();
+        s.show("low");
+        CombatVision vision(s.c, s.root + "/native/resources/characters.json");
+        QVERIFY(!vision.healthBar(true));
+        QVERIFY(!vision.shiftedHealthBar());
+        QVERIFY(vision.lowBossHealth());
+        CombatSession combat(s.c, s.root, s.directory.path());
+        combat.targetEnemyTimeout = .2;
+        QVERIFY(!combat.active());
+        QVERIFY(s.events.isEmpty());
+        s.show("locked");
+        QVERIFY(combat.active());
+        s.clock.time += .3;
+        s.show("low");
+        QVERIFY(combat.active());
+        s.clock.time += .3;
+        s.show("no-title");
+        QVERIFY(!vision.lowBossHealth());
+        QVERIFY(combat.active());
+        s.clock.time += 1.6;
+        QVERIFY(!combat.active());
+        QVERIFY(!s.c.state->inCombat);
+        QVERIFY(s.input.idle());
+    }
     void localDesktopBgraFramesRecognizeEachMemberAndStopAtTheEndOfCombat() {
         for(const auto backend:QStringList{"DXGI","WIN32"})for(const QSize size:
             {QSize(1280,720),QSize(1920,1080),QSize(2560,1440)}) {
@@ -584,6 +631,72 @@ class WorkflowTests : public QObject {
         QVERIFY(s.c.state->inCombat);
         QVERIFY(s.input.idle());
     }
+    void localCombatSurvivesBriefHudSignalLossAndStopsWhenEvidenceExpires_data() {
+        QTest::addColumn<bool>("autoTarget");
+        QTest::newRow("relock-enabled") << true;
+        QTest::newRow("manual-lock") << false;
+    }
+    void localCombatSurvivesBriefHudSignalLossAndStopsWhenEvidenceExpires() {
+        QFETCH(bool, autoTarget);
+        Scenes s;
+        s.c.streamedCapture = true;
+        s.c.observeDesktopImage({{"executable", "Client-Win64-Shipping.exe"}});
+        QVERIFY(s.c.localDesktopGame);
+        s.clock.minimumStep = .025;
+        s.c.task = "AutoCombatTask";
+        s.profile.set("AutoCombatTask", "Auto Target", autoTarget);
+        s.frame("lock", {"has_target", "char_2_text", "char_3_text"});
+        s.frame("bar", {"char_2_text", "char_3_text"});
+        cv::rectangle(s.frames["bar"], {500, 220, 160, 6}, cv::Scalar(65, 70, 200), cv::FILLED);
+        s.show("lock");
+        CombatSession combat(s.c, s.root, s.directory.path());
+        QVERIFY(combat.active());
+        s.clock.time = .25;
+        s.show("world");
+        QVERIFY(combat.active());
+        QCOMPARE(s.clock.time, .25);
+        QVERIFY(s.events.isEmpty());
+        s.clock.time = .65;
+        s.show("bar");
+        QVERIFY(combat.active());
+        QVERIFY(s.events.isEmpty());
+        s.clock.time = 1.1;
+        s.show("world");
+        QVERIFY(combat.active()); // The health-only frame refreshed the recovery window.
+        s.clock.time = 1.5;
+        QVERIFY(!combat.active()); // The same absent frame must not renew the window.
+        QVERIFY(!s.c.state->inCombat);
+        QVERIFY(s.input.idle());
+        const auto attempts = std::count_if(s.events.begin(), s.events.end(), [](const auto &event) {
+            return event["op"] == "button" && event["name"] == "middle" && !event["down"].toBool();
+        });
+        if (autoTarget)
+            QVERIFY(attempts > 0 && attempts <= 4);
+        else
+            QCOMPARE(attempts, 0);
+        QVERIFY(s.clock.time < 2.45);
+    }
+    void localAutoCombatKeepsConfirmedLowBossHealthOnlyAfterEngaging() {
+        Scenes s;
+        s.c.streamedCapture = true;
+        s.c.observeDesktopImage({{"executable", "Client-Win64-Shipping.exe"}});
+        QVERIFY(s.c.localDesktopGame);
+        s.c.task = "AutoCombatTask";
+        s.frame("lock", {"has_target", "char_2_text", "char_3_text"});
+        s.frame("low", {"char_2_text", "char_3_text"});
+        cv::rectangle(s.frames["low"], {680, 56, 7, 10}, cv::Scalar(60, 175, 234), cv::FILLED);
+        s.words["low"] = {s.word("Lv. 90 Boss", .44, .014, .12, .025)};
+        s.show("low");
+        CombatSession combat(s.c, s.root, s.directory.path());
+        QVERIFY(!combat.active());
+        QVERIFY(s.events.isEmpty());
+        s.show("lock");
+        QVERIFY(combat.active());
+        s.clock.time = 1.1;
+        s.show("low");
+        QVERIFY(combat.active());
+        QVERIFY(s.events.isEmpty());
+    }
     void dailyRecoversStaminaFromScrolledPanelAndClosesEveryRewardPopover_data() {
         QTest::addColumn<bool>("fullscreenReward");
         QTest::newRow("inline-item-popover") << false;
@@ -657,6 +770,40 @@ class WorkflowTests : public QObject {
         QCOMPARE(sidebarClicks, 0);
         QCOMPARE(s.scene, QString("world"));
         QVERIFY(s.clock.time < 15);
+    }
+    void browserEchoWaitsForTheSelectedCategoryAndStopsScrollingIfItChanges() {
+        Scenes s;
+        s.c.browserCapture = true;
+        s.profile.set("Task Recovery", "Resume Interrupted Tasks", false);
+        const QStringList features{"gray_book_boss", "gray_book_quest"};
+        s.frame("cultivation", features);
+        s.frame("weekly", features);
+        const auto weekly = s.word("战歌重奏", .15, .585, .068, .03);
+        s.words["cultivation"] = {weekly};
+        s.words["weekly"] = {weekly};
+        const auto tile = gameBox(s.frames["weekly"], .102, .565, .346, .653);
+        cv::rectangle(s.frames["weekly"], {tile.x(), tile.y(), tile.width(), tile.height()},
+                      cv::Scalar(212, 214, 213), cv::FILLED);
+        int categoryClicks = 0;
+        int wheels = 0;
+        const auto target = weekly.center().toPoint();
+        s.action = [&](const QJsonObject &event) {
+            if (s.leftUp(event) && (s.pointer - target).manhattanLength() < 8 && ++categoryClicks == 2)
+                s.scene = "weekly";
+            if (event["op"] == "wheel") {
+                ++wheels;
+                s.scene = "blank";
+            }
+        };
+        s.show("cultivation");
+        Navigation navigation(s.c);
+        navigation.bookCategory("zhange", .1);
+        QCOMPARE(s.scene, QString("weekly"));
+        QCOMPARE(categoryClicks, 2);
+        QCOMPARE(wheels, 0);
+        QVERIFY_THROWS_EXCEPTION(NavigationFailure, navigation.selectBookEntry(6, 9, {}, false, "zhange"));
+        QCOMPARE(wheels, 1);
+        QCOMPARE(categoryClicks, 2);
     }
     void dailyFarmReusesTheOpenGuidebookWithoutEscapeOrF2() {
         Scenes s;
@@ -1236,9 +1383,20 @@ class WorkflowTests : public QObject {
             QVERIFY(s.input.idle());
         }
     }
-    void repeatedDomainWaitsForLoadingInsteadOfOldHud() {
+    void repeatedDomainWaitsForVerifiedNextRound_data() {
+        QTest::addColumn<bool>("fast");
+        QTest::newRow("loading-then-party") << false;
+        QTest::newRow("local-skip-loading") << true;
+    }
+    void repeatedDomainWaitsForVerifiedNextRound() {
+        QFETCH(bool, fast);
         Scenes s;
+        s.c.streamedCapture = fast;
+        s.c.desktopRecognitionMode = "local";
+        s.c.task = "FarmEchoTask2";
         s.frame("restart", {});
+        s.frames["new-boss"] = s.frames["realm"].clone();
+        cv::rectangle(s.frames["new-boss"], {680, 58, 430, 8}, cv::Scalar(40, 120, 250), cv::FILLED);
         s.words["restart"] = {s.word("重新挑战", .6, .5)};
         double requested = -1;
         s.action = [&](auto e) {
@@ -1253,15 +1411,23 @@ class WorkflowTests : public QObject {
             if (requested < 0)
                 return;
             const auto age = s.clock.time - requested;
-            if (age > .75 && age < 1.75)
+            if (fast) {
+                if (age >= .25)
+                    s.scene = "new-boss";
+            } else if (age > .75 && age < 1.75)
                 s.scene = "blank";
             else if (age >= 1.75)
                 s.scene = "realm";
         };
         s.show("realm");
-        restartBossDomain(s.c);
+        CombatSession combat(s.c, s.root, s.directory.path());
+        restartBossDomain(s.c, [&] { return combat.hasHealthBar(); });
         QCOMPARE(s.clicks(), 1);
-        QVERIFY(s.clock.time - requested >= 1.75);
+        QCOMPARE(s.scene, fast ? QString("new-boss") : QString("realm"));
+        if (fast)
+            QVERIFY(s.clock.time - requested < 1.75);
+        else
+            QVERIFY(s.clock.time - requested >= 1.75);
         QVERIFY(s.input.idle());
     }
     void mergeRequiresResultAndHandlesSuppressedConfirmation() {

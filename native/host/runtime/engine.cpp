@@ -927,6 +927,7 @@ void Engine::run(QString selected, uint64_t epoch, QJsonObject options) {
             });
         QJsonObject progressState;
         context.streamedCapture = config.s("capture.source") == "desktop";
+        context.browserCapture = config.browserCloud();
         context.desktopRecognitionMode=config.s("capture.recognition_mode");
         QJsonObject imageEnvironment;
         i64 environmentRead=0;

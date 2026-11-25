@@ -82,6 +82,11 @@ class BaseCombatTask(CombatCheck):
         self.use_liberation = True
         # 由副本恢复循环维护: 本轮从信标直接进本时, 退本即回到信标并自动回血
         self.realm_entry_at_heal_point = False
+        self._support_handoff_target = None
+
+    def do_reset_to_false(self):
+        self._support_handoff_target = None
+        return super().do_reset_to_false()
 
     def add_freeze_duration(self, start, duration=-1.0, freeze_time=0.1):
         """添加冻结持续时间。用于精确计算技能冷却等。
@@ -603,6 +608,12 @@ class BaseCombatTask(CombatCheck):
         if candidates_without_switch_cd:
             candidates = candidates_without_switch_cd
 
+        if (not current_char.is_main_dps
+                and getattr(self, '_support_handoff_target', None) == current_char.index):
+            main_dps = self._oldest_switch_target([char for char in candidates if char.is_main_dps])
+            if main_dps:
+                return self._log_switch_choice(current_char, main_dps, False, 'support_chain_return_to_main_dps')
+
         target = self._choose_switch_target_by_buff_time(current_char, candidates)
         if target != current_char and not target.is_main_dps and not target.has_buff():
             reason = f'unbuffed_{target.char_type.value.lower()}'
@@ -708,6 +719,9 @@ class BaseCombatTask(CombatCheck):
                 self.in_liberation = False
                 if not has_intro:
                     current_char.f_break(check_f_on_switch=True)
+                self._support_handoff_target = (
+                    switch_to.index if not (has_intro or current_char.is_main_dps or switch_to.is_main_dps) else None
+                )
                 current_char.switch_out(con_full=has_intro)
                 switch_to.is_current_char = True
                 switch_to.last_switch_in_time = time.time()
@@ -1008,48 +1022,59 @@ class BaseCombatTask(CombatCheck):
     def get_current_con(self):
         """获取当前角色的协奏值百分比。
 
+        The concerto bar is a coloured arc on a grey track. It does not fill as a
+        single clockwise sweep, so the value is the share of the ring's angle
+        covered by element-coloured pixels. This needs no per-resolution
+        calibration and counts short arcs that a minimum-area filter would drop.
+
         Returns:
-            float: 协奏值百分比 (0.0 到 1.0)。
+            float: 协奏值百分比 (0.0 到 1.0)。只有整圈都被覆盖时才返回 1。
         """
         box = self.get_con_box()
-        box.confidence = 0
-
-        max_area = 0
-        percent = 0
-        max_is_full = False
         target_index = self._ensure_ring_index()
-
-        cropped = box.crop_frame(self.frame)
-        for i in range(len(con_colors)):
-            if target_index != -1 and i != target_index:
-                continue
-            color_range = con_colors[i]
-            area, is_full = self.count_rings(cropped, color_range,
-                                             1500 / 3840 / 2160 * self.screen_width * self.screen_height)
-            if is_full:
-                max_is_full = is_full
-            if area > max_area:
-                max_area = int(area)
-        if max_is_full:
-            percent = 1
-        if max_is_full:
-            self.con_full_size[str(target_index)] = max_area
-
-        if percent != 1 and self.con_full_size[str(target_index)] > 0:
-            percent = max_area / self.con_full_size[str(target_index)]
-        if not max_is_full and percent >= 1:
-            self.logger.warning(
-                f'is_con_full not full but percent greater than 1, set to 0.99, {percent} {max_is_full}')
-            percent = 0.99
-        if percent > 1:
-            self.logger.error(f'is_con_full percent greater than 1, set to 1, {percent} {max_is_full}')
-            percent = 1
-
+        percent = self.measure_con_arc(box.crop_frame(self.frame), target_index)
         box.confidence = percent
         self.draw_boxes(f'is_con_full_{self}', box)
-        if percent > 1:
-            percent = 1
         return percent
+
+    def measure_con_arc(self, image, ring_index):
+        """Return the fraction (0..1) of the concerto ring covered by its element colour.
+
+        Args:
+            image (numpy.ndarray): BGR crop of the con box (``get_con_box``).
+            ring_index (int): Index into ``con_colors`` / ``Elements``.
+        """
+        if image is None or image.size == 0 or ring_index < 0:
+            return 0
+        if image.shape[:2] != (63, 63):
+            image = cv2.resize(image, (63, 63))
+        h, w = image.shape[:2]
+        center_y, center_x = (h - 1) / 2, (w - 1) / 2
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        yy, xx = np.mgrid[0:h, 0:w]
+        distance = np.hypot(yy - center_y, xx - center_x)
+        band = (distance >= h * CON_RING_INNER_RATIO) & (distance <= h * CON_RING_OUTER_RATIO + 1)
+        hue_diff = np.abs(hsv[..., 0].astype(np.int16) - con_hues[ring_index])
+        hue_diff = np.minimum(hue_diff, 180 - hue_diff)
+        mask = (band & (hue_diff <= CON_HUE_TOLERANCE) & (hsv[..., 1] >= CON_MIN_SATURATION)
+                & (hsv[..., 2] >= CON_MIN_VALUE))
+        angles = (np.degrees(np.arctan2(xx - center_x, center_y - yy)) + 360) % 360
+        bin_size = 360 / CON_ANGLE_BINS
+        counts = np.bincount((angles[mask] / bin_size).astype(int) % CON_ANGLE_BINS,
+                             minlength=CON_ANGLE_BINS)
+        covered = counts >= CON_MIN_PIXELS_PER_BIN
+        if covered.all():
+            return 1
+        if not covered.any():
+            return 0
+        # Bridge single-bin gaps left by the white tick marks crossing the ring.
+        bridged = covered.copy()
+        for i in range(CON_ANGLE_BINS):
+            if not covered[i] and covered[i - 1] and covered[(i + 1) % CON_ANGLE_BINS]:
+                bridged[i] = True
+        if bridged.all():
+            return 1
+        return min(float(bridged.sum()) / CON_ANGLE_BINS, 0.99)
 
     def count_rings(self, image, color_range, min_area):
         """在指定图像区域内计算特定颜色范围的能量环数量和状态。
@@ -1209,6 +1234,21 @@ lib_ready_templates = [  # 头像右边大招可用对号
     'lib_ready_wind',  # 1
     'lib_ready_havoc',  # 3
 ]
+
+def _con_color_hue(color_range):
+    center = np.uint8([[[sum(color_range['b']) // 2, sum(color_range['g']) // 2, sum(color_range['r']) // 2]]])
+    return int(cv2.cvtColor(center, cv2.COLOR_BGR2HSV)[0, 0, 0])
+
+
+con_hues = [_con_color_hue(color_range) for color_range in con_colors]  # OpenCV hue (0-179) per element
+CON_RING_INNER_RATIO = 0.35119  # ring band radius as a fraction of the con box height
+CON_RING_OUTER_RATIO = 0.42261
+CON_ANGLE_BINS = 72  # 5 degrees per bin
+CON_HUE_TOLERANCE = 8
+CON_MIN_SATURATION = 100  # filled arc ~130-160; the empty grey track is ~40-65
+CON_MIN_VALUE = 170  # filled arc ~215-235; the empty track is ~120-170
+CON_MIN_PIXELS_PER_BIN = 3
+
 
 con_full_templates = [  # 头像右边表示当前角色 协奏满
     'con_full_spectro',  # 3

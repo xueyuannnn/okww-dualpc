@@ -188,6 +188,7 @@ struct Duplication {
     ComPtr<IDXGIOutputDuplication> output;
     ComPtr<ID3D11Texture2D> staging;
     QRect bounds;
+    QRect lastRegion;
     DXGI_MODE_ROTATION rotation = DXGI_MODE_ROTATION_IDENTITY;
     QImage last;
     explicit Duplication(QRect target);
@@ -393,6 +394,10 @@ Duplication::Duplication(QRect target) {
     rust::platformWorkflowRun(rust::WorkflowMethod::DesktopDuplicationCreate, {}, sdk);
 }
 QImage Duplication::frame(QRect target, bool &changed) {
+    if (target != lastRegion) {
+        last = QImage{};
+        lastRegion = target;
+    }
     DesktopDuplicationSdk sdk{*this, target, &changed};
     rust::platformWorkflowRun(rust::WorkflowMethod::DesktopDuplicationFrame, {}, sdk);
     return last;
@@ -413,7 +418,8 @@ struct CaptureDesktopRunSdk {
     std::optional<RestoreDpi> restore;
     QJsonObject identity;
     std::optional<DesktopTarget> target;
-    QRect initial;
+    QRect initial, lastWindowRect;
+    bool trackWindow = false, resizeSupported = false;
     std::unique_ptr<Duplication> duplication;
     std::unique_ptr<GdiFrame> gdi;
     std::chrono::nanoseconds interval{};
@@ -439,9 +445,11 @@ struct CaptureDesktopRunSdk {
             break;
         case rust::WorkflowOp::DesktopRunTarget:
             target.emplace(identity);
+            trackWindow = tracksLocalGameWindow(c.config_);
             break;
         case rust::WorkflowOp::DesktopRunInitialRect:
             initial = target->rect();
+            lastWindowRect = initial;
             break;
         case rust::WorkflowOp::DesktopRunInitialSize:
             out[0] = initial.width();
@@ -476,6 +484,11 @@ struct CaptureDesktopRunSdk {
             break;
         case rust::WorkflowOp::DesktopRunReadRect:
             rect = target->rect();
+            if (trackWindow && rect != lastWindowRect) {
+                c.desktopRecovery("正在更新游戏窗口采集范围");
+                resizeSupported = canResizeLocalGameWindow(c.config_, initial.size(), rect.size());
+                lastWindowRect = rect;
+            }
             break;
         case rust::WorkflowOp::DesktopRunRectInDesktop:
             out[0] = virtualDesktopRect().contains(rect);
@@ -483,11 +496,16 @@ struct CaptureDesktopRunSdk {
         case rust::WorkflowOp::DesktopRunSameSize:
             out[0] = rect.size() == initial.size();
             break;
+        case rust::WorkflowOp::DesktopRunCanResizeWindow:
+            out[0] = resizeSupported;
+            break;
         case rust::WorkflowOp::DesktopRunHasDuplication:
+            if (trackWindow && duplication && !duplication->bounds.contains(rect))
+                duplication.reset();
             out[0] = bool(duplication);
             break;
         case rust::WorkflowOp::DesktopRunCreateDuplication:
-            duplication = std::make_unique<Duplication>(initial);
+            duplication = std::make_unique<Duplication>(trackWindow ? rect : initial);
             break;
         case rust::WorkflowOp::DesktopRunClearChanged:
             changed = false;
@@ -581,7 +599,8 @@ struct CaptureDesktopRunSdk {
             else if (a[0] == 1)
                 fail("截图窗口超出桌面，请将窗口完整移回屏幕内再连接");
             else if (a[0] == 2)
-                fail("截图窗口尺寸已改变，请重新连接以更新识别与输入坐标");
+                fail(trackWindow ? "请将游戏窗口调整为至少 1280 × 720 的 16:9 画面"
+                                 : "截图窗口尺寸已改变，请重新连接以更新识别与输入坐标");
             else
                 fail("Win32 截图失败，请检查窗口是否可见");
             break;

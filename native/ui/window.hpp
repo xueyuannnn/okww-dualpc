@@ -208,6 +208,7 @@ class Window final : public QMainWindow {
     QComboBox *codeSource_ = nullptr, *codeView_ = nullptr;
     QStackedWidget *boxForms_ = nullptr;
     QStackedWidget *captureForms_ = nullptr;
+    QComboBox *cloudBrowser_ = nullptr;
     QComboBox *captureSource_ = nullptr, *localCaptureTarget_ = nullptr,
               *dxgiMonitor_ = nullptr, *dxgiCaptureFps_ = nullptr, *localInputTarget_ = nullptr;
     QLabel *dxgiRefresh_ = nullptr;
@@ -237,7 +238,6 @@ class Window final : public QMainWindow {
                      std::function<void(QString, QJsonValue)> changed);
     void flushFieldSaves();
     void editAccountProfiles(QJsonArray profiles, std::function<void(QJsonValue)> changed);
-    void openCloudGame();
     void send(QJsonObject cmd, std::function<void(QJsonObject)> callback = {},
               std::function<void(QString)> failed = {});
     void runAsync(std::function<QJsonObject()> work, std::function<void(QJsonObject)> done = {});

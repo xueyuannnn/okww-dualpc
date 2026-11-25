@@ -186,7 +186,7 @@ std::array<double, 3> Input::rustInput(int method, std::initializer_list<double>
                 out[0] = QStringList{"left", "right", "middle"}.contains(request.key);
                 break;
             case rust::WorkflowOp::InputLocal:
-                out[0] = config_.s("kmbox.protocol") == "sendinput";
+                out[0] = config_.s("kmbox.protocol") == "sendinput" || config_.browserCloud();
                 break;
             case rust::WorkflowOp::InputSendMove:
                 send({{"op", "move"}, {"x", int(a[0])}, {"y", int(a[1])}});

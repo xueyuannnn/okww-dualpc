@@ -11,7 +11,7 @@
 | 界面 | Qt 6.8 | 选择支持 Win7 的 Qt 构建，适配 Qt 版本差异并检查全部二级界面 |
 | Rust | `x86_64-pc-windows-msvc` | 单独构建 `x86_64-win7-windows-msvc` 标准库与内核，不混用主版本静态库 |
 | 系统 API | 源码中的线程名称和 DPI 接口已改为按能力动态调用，缺失时使用系统 DPI | 继续检查主程序、插件和运行库的导入表，移除强制依赖的新系统接口 |
-| 视频采集 | 主版本含 DXGI、Win32、DirectShow、Media Foundation | Win7 首版以 Win32 和驱动支持的 DirectShow 采集卡为目标，Media Foundation 需单独验证；不提供现有 DXGI 桌面复制模式 |
+| 视频采集 | 主版本含 DXGI、Win32、DirectShow、Media Foundation 和浏览器 WebRTC | Win7 首版以 Win32 和驱动支持的 DirectShow 采集卡为目标。Media Foundation、网页云游戏需要单独适配与验收。 |
 | 输入 | SendInput、KMBox Net | 验证坐标、按住／释放、网络回复、暂停和异常释放；不改变连招时序 |
 | OCR 与模型推理 | OpenVINO 2026.4.1，PP-OCRv6 small | 选择可在 Win7 加载的推理后端，复用模型与字典配对规则，用同组截图回放核对结果 |
 | Python 工坊 | Python 3.12；项目与 ok-script 要求 Python 3.11 以上 | 单独处理解释器、PySide、NumPy、OpenCV 和语法／标准库差异；不能只把解释器替换为 Python 3.8 |

@@ -278,6 +278,7 @@ config = {
         ["src.task.GardenTask", "GardenTask"],
         ["src.task.GalGameTask", "GalGameTask"],
         ["src.task.RahaiBlocksTask", "RahaiBlocksTask"],
+        ["src.task.CultivationTask", "CultivationTask"],
         # ["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],

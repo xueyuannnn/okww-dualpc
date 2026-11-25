@@ -534,8 +534,10 @@ QWidget *Window::devicePage() {
     captureSource_->addItem("采集卡采集", "card");
     captureSource_->addItem("DXGI 单机模式", "DXGI_LOCAL");
     captureSource_->addItem("DXGI 远程模式", "DXGI_REMOTE");
-    const auto source = deviceDraftConfig_.s("capture.source") == "desktop"
-        ? (deviceDraftConfig_.s("capture.recognition_mode")=="remote" ? "DXGI_REMOTE" : "DXGI_LOCAL") : "card";
+    captureSource_->addItem("网页云游戏", "browser");
+    const auto source = deviceDraftConfig_.browserCloud() ? QString("browser") :
+        deviceDraftConfig_.s("capture.source") == "desktop"
+            ? (deviceDraftConfig_.s("capture.recognition_mode")=="remote" ? "DXGI_REMOTE" : "DXGI_LOCAL") : "card";
     captureSource_->setCurrentIndex(std::max(0, captureSource_->findData(source)));
     sourceRow->addWidget(sourceLabel); sourceRow->addWidget(captureSource_,1);
     captureLayout->addLayout(sourceRow);
@@ -636,10 +638,26 @@ QWidget *Window::devicePage() {
     dxgiRefresh_->setProperty("caption",true);
     dxgiForm->addRow("采集帧率",dxgiCaptureFps_);
     dxgiForm->addRow(dxgiRefresh_);
-    auto dxgiHint=new QLabel("高级设置可选择显示器或窗口。窗口采集需保持可见、未遮挡，完整位于同一显示器；改变窗口尺寸后重新连接。帧率可跟随显示器刷新率，也可选择或输入 1–1000。");
+    auto dxgiHint=new QLabel("窗口化游戏可在高级设置选取鸣潮窗口。单机模式下，16:9 窗口在 720p 及以上切换尺寸会自动恢复采集。窗口需完整位于一块显示器内，保持可见且无遮挡。");
     dxgiHint->setObjectName("caption"); dxgiHint->setWordWrap(true);
     dxgiForm->addRow(dxgiHint);
     captureForms_->addWidget(dxgiPanel);
+    auto cloudPanel = new QWidget;
+    auto cloudLayout = new QVBoxLayout(cloudPanel);
+    cloudLayout->setContentsMargins(0, 8, 0, 0);
+    auto cloudBrowserRow = new QFormLayout;
+    cloudBrowser_ = new classic::ComboBox;
+    cloudBrowser_->setObjectName("cloudBrowserChoice");
+    cloudBrowser_->addItem("跟随系统默认", "auto");
+    cloudBrowser_->addItem("Google Chrome", "chrome");
+    cloudBrowser_->addItem("Microsoft Edge", "edge");
+    cloudBrowser_->setCurrentIndex(std::max(0, cloudBrowser_->findData(deviceDraftConfig_.s("capture.cloud_browser"))));
+    cloudBrowserRow->addRow("云游戏浏览器", cloudBrowser_);
+    cloudLayout->addLayout(cloudBrowserRow);
+    auto cloudHint = new QLabel("点「开始」会连接已有的专用浏览器，首次使用请按网页提示登录。");
+    cloudHint->setWordWrap(true);
+    cloudLayout->addWidget(cloudHint);
+    captureForms_->addWidget(cloudPanel);
     auto targetRow = new QHBoxLayout;
     localCaptureTarget_ = new classic::ComboBox;
     localCaptureTarget_->setObjectName("localCaptureTarget");
@@ -885,25 +903,36 @@ QWidget *Window::devicePage() {
     box->addWidget(localInputAdvanced);
     localInputAdvanced->hide();
     advanced->setVisible(false);
-    const auto updateInputForm = [this,expand,advanced,localInputAdvanced,moveHint] {
+    const auto updateInputForm = [this,expand,advanced,localInputAdvanced,moveHint,protocolLabel] {
+        const auto source = captureSource_->currentData().toString();
+        const bool cloud = source == "browser";
         const bool local = protocol_->currentData().toString() == "sendinput";
+        protocol_->setVisible(!cloud);
+        protocolLabel->setVisible(!cloud);
+        boxForms_->setVisible(!cloud);
+        expand->setVisible(!cloud);
         boxForms_->setCurrentIndex(local ? 1 : 0);
         expand->setText(local ? "高级设置" : "鼠标定位与移动倍率");
-        advanced->setVisible(!local && expand->isChecked());
-        localInputAdvanced->setVisible(local && expand->isChecked());
-        moveHint->setText(local ? "连接后可测试本机鼠标向右、向下移动，移动距离受 Windows 指针速度影响。" : "连接盒子后可测试鼠标向右、向下各移动 40 px。实际移动距离受游戏机鼠标速度、指针加速和移动倍率影响。");
+        advanced->setVisible(!cloud && !local && expand->isChecked());
+        localInputAdvanced->setVisible(!cloud && local && expand->isChecked());
+        moveHint->setText(cloud ? "云游戏会自动配置键鼠。" : local ? "连接后可测试本机鼠标向右、向下移动，移动距离受 Windows 指针速度影响。" : "连接盒子后可测试鼠标向右、向下各移动 40 px。实际移动距离受游戏机鼠标速度、指针加速和移动倍率影响。");
     };
     connect(protocol_, &QComboBox::currentIndexChanged, this, updateInputForm);
+    connect(captureSource_, &QComboBox::currentIndexChanged, this, updateInputForm);
     connect(expand,&QPushButton::toggled,this,updateInputForm);
     updateInputForm();
-    const auto updateCaptureForm = [this,caf,manual,dxgiTargetSettings,remoteFullscreenHint] {
-        const bool cardMode = captureSource_->currentData().toString() == "card";
-        captureForms_->setCurrentIndex(cardMode ? 0 : 1);
+    const auto updateCaptureForm = [this,caf,manual,dxgiTargetSettings,remoteFullscreenHint,overlayHint,dxgiHint] {
+        const auto source = captureSource_->currentData().toString();
+        const bool cardMode = source == "card";
+        const bool cloud = source == "browser";
+        captureForms_->setCurrentIndex(cardMode ? 0 : cloud ? 2 : 1);
+        overlayHint->setVisible(!cloud);
         remoteFullscreenHint->setVisible(captureSource_->currentData().toString()=="DXGI_REMOTE");
+        dxgiHint->setVisible(captureSource_->currentData().toString()=="DXGI_LOCAL");
         caf->setRowVisible(backendChoice_,cardMode);
         caf->setRowVisible(manualCapture_,cardMode);
         caf->setRowVisible(manual,cardMode && manualCapture_->isChecked());
-        caf->setRowVisible(dxgiTargetSettings,!cardMode);
+        caf->setRowVisible(dxgiTargetSettings,!cardMode && !cloud);
     };
     connect(captureSource_, &QComboBox::currentIndexChanged, this, updateCaptureForm);
     connect(manualCapture_, &QCheckBox::toggled, this, updateCaptureForm);
@@ -932,9 +961,10 @@ QWidget *Window::devicePage() {
     manualCapture_->setChecked(deviceUiState_["manual_capture"].toBool());
     updateCaptureForm();
     connect(captureSource_, &QComboBox::currentIndexChanged, this, [this] {
-        if (captureSource_->currentData().toString() != "card") scanDesktopTargets();
+        const auto source = captureSource_->currentData().toString();
+        if (source.startsWith("DXGI")) scanDesktopTargets();
     });
-    for (auto choice : {backendChoice_, deviceChoice_, resolution_, format_, fps_, protocol_, inferenceResolution_, captureSource_, localCaptureTarget_, dxgiMonitor_, localInputTarget_})
+    for (auto choice : {backendChoice_, deviceChoice_, resolution_, format_, fps_, protocol_, inferenceResolution_, captureSource_, cloudBrowser_, localCaptureTarget_, dxgiMonitor_, localInputTarget_})
         connect(choice, &QComboBox::currentIndexChanged, this, &Window::queueDeviceSave);
     connect(dxgiCaptureFps_, &QComboBox::currentTextChanged, this, &Window::queueDeviceSave);
     connect(manualCapture_, &QCheckBox::toggled, this, &Window::queueDeviceSave);
@@ -1205,10 +1235,14 @@ void Window::filterModes() {
 }
 Config Window::deviceConfiguration(bool requireSelection) const {
     auto current = deviceDraftConfig_;
-    current.set("capture.recognition_mode",captureSource_->currentData().toString()=="DXGI_REMOTE" ? "remote" : "local");
+    const auto source = captureSource_->currentData().toString();
+    const bool cloud = source == "browser";
+    const bool local = source.startsWith("DXGI");
+    current.set("capture.recognition_mode", source == "DXGI_REMOTE" ? "remote" : "local");
     current.set("kmbox.dry_run", false);
-    const bool local = captureSource_->currentData().toString() != "card";
-    current.set("capture.source",local ? "desktop" : "card");
+    current.set("capture.source", cloud ? "browser" : local ? "desktop" : "card");
+    if (cloud || !current.s("capture.cloud_browser").isEmpty())
+        current.set("capture.cloud_browser", cloudBrowser_->currentData().toString());
     if (local) current.set("capture.local_backend","DXGI");
     current.set("capture.local_target",QJsonObject::fromVariantMap(localCaptureTarget_->currentData().toMap()));
     current.set("capture.dxgi_follow_refresh",dxgiCaptureFps_->currentText()==dxgiCaptureFps_->itemText(0));
@@ -1225,7 +1259,7 @@ Config Window::deviceConfiguration(bool requireSelection) const {
     current.set("capture.device_index", d["index"].toInt());
     auto size = resolution_->currentData().toList();
     const bool complete = size.size() == 2 && fps_->currentData().isValid() && format_->currentIndex() >= 0;
-    if (!local && !manualCapture_->isChecked() && !complete && requireSelection)
+    if (!cloud && !local && !manualCapture_->isChecked() && !complete && requireSelection)
         fail("请选择采集设备及 NV12 分辨率和帧率，或使用手动参数");
     if (!manualCapture_->isChecked() && complete) {
         current.set("capture.width", size[0].toInt());
@@ -1332,7 +1366,7 @@ void Window::prepareConnection(const Config &config) {
     if (engine_.state() != QProcess::NotRunning)
         engine_.write("{\"op\":\"shutdown\"}\n");
 #endif
-    log("正在后台连接视频采集与键鼠控制…");
+    log(config.browserCloud() ? "正在连接专用浏览器，必要时会自动打开云·鸣潮…" : "正在后台连接视频采集与键鼠控制…");
     runAsync(
         [this, config] {
             QElapsedTimer elapsed;
@@ -1845,7 +1879,9 @@ void Window::updateStatus() {
         test->setEnabled(running && box["connected"].toBool() && !pendingStart_ && !stopRequested_ && !stoppingDevices_);
     }
     captureConnection_->setText(
-        captured ? QString("已连接 · 实测 %1 FPS").arg(actual["measured_fps"].toDouble(), 0, 'f', 1)
+        captured ? QString("%1 · 实测 %2 FPS")
+                       .arg(actual["backend"] == "WEBRTC" ? (actual["browser_capture"] == "video" ? "WebRTC 视频流" : "浏览器页面") : "已连接")
+                       .arg(actual["measured_fps"].toDouble(), 0, 'f', 1)
                  : "未连接");
     boxConnection_->setText(s["dry_run"].toBool()       ? "离线测试 · 未连接实物"
                             : box["connected"].toBool() ? "已连接"
@@ -1862,7 +1898,7 @@ void Window::updateStatus() {
                        .arg(actual["width"].toInt())
                        .arg(actual["height"].toInt())
                        .arg(actual["fourcc"].toString())
-                       .arg(QStringList{"DXGI","WIN32"}.contains(actual["backend"].toString()) ? "上限" : "协商")
+                       .arg(QStringList{"DXGI","WIN32","WEBRTC"}.contains(actual["backend"].toString()) ? "上限" : "协商")
                        .arg(actual["negotiated_fps"].toDouble(actual["requested_fps"].toDouble()))
                  : "—");
     frameAge_->setText(
@@ -2052,10 +2088,6 @@ void Window::buildFields(QWidget *target, const QJsonArray &fields,
             connect(w, &QPushButton::clicked, this, [this, val, changed, key] {
                 editAccountProfiles(val.toArray(), [changed, key](QJsonValue values) { changed(key, values); });
             });
-            editor = w;
-        } else if (kind == "cloud_launch") {
-            auto w = new QPushButton("打开云·鸣潮");
-            connect(w, &QPushButton::clicked, this, &Window::openCloudGame);
             editor = w;
         } else if (kind == "boolean") {
             auto w = new classic::Switch;

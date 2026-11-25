@@ -10,6 +10,7 @@ struct State {
     QJsonArray trace;
     std::array<uint8_t, 256> bytes{};
     std::atomic<bool> *stop = nullptr;
+    QSize resizeTo;
     explicit State(int s) : scene(s) {}
 };
 inline thread_local State *active = nullptr;
@@ -46,6 +47,8 @@ struct DesktopTarget {
     QRect rect() {
         const int index = active->rects++;
         active->trace.append(QJsonObject{{"rect", index}});
+        if (active->resizeTo.isValid())
+            return {QPoint(-1700, 30), index > 1 ? active->resizeTo : QSize(1280, 720)};
         if (active->scene % 7 == 5)
             return {0, 0, 8193, 1080};
         if (index && active->scene % 7 == 3 && index < 4)
@@ -61,6 +64,8 @@ struct DesktopTarget {
 };
 inline QRect virtualDesktopRect() {
     active->trace.append("virtual-desktop");
+    if (active->resizeTo.isValid())
+        return {-1920, 0, 3840, 1080};
     return {0, 0, 100, 100};
 }
 inline double displayRefreshRate(const QString &name) {
@@ -84,7 +89,7 @@ struct Duplication {
         changed = active->scene % 3 != 0;
         if (active->scene % 5 == 0 && index < 3)
             return {};
-        QImage image(8, 4, QImage::Format_RGB32);
+        QImage image(active->resizeTo.isValid() ? rect.size() : QSize(8, 4), QImage::Format_RGB32);
         image.fill(QColor(50, 80, 120));
         return image;
     }
@@ -324,6 +329,9 @@ struct CaptureDesktopRunSdk {
         case rust::WorkflowOp::DesktopRunSameSize:
             out[0] = rect.size() == initial.size();
             break;
+        case rust::WorkflowOp::DesktopRunCanResizeWindow:
+            out[0] = active->resizeTo.isValid();
+            break;
         case rust::WorkflowOp::DesktopRunHasDuplication:
             out[0] = bool(duplication);
             break;
@@ -459,6 +467,14 @@ inline QJsonObject outcome(int scene, bool dxgi, bool rust) {
     State state(scene);
     active = &state;
     auto result = rust ? run<current::Capture>(dxgi) : run<original::Capture>(dxgi);
+    result["trace"] = state.trace;
+    return result;
+}
+inline QJsonObject resizeOutcome(bool dxgi) {
+    State state(11);
+    state.resizeTo = QSize(1600, 900);
+    active = &state;
+    auto result = run<current::Capture>(dxgi);
     result["trace"] = state.trace;
     return result;
 }

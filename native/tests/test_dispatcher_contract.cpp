@@ -47,10 +47,12 @@ class DispatcherContracts final : public QObject {
     void catalogue() {
         const auto callback = [](const QString &) { return true; };
         const auto actual = businessTasks(callback), expected = reference_businessTasks(callback);
-        QCOMPARE(actual.size(), expected.size() + 2);
+        QCOMPARE(actual.size(), expected.size() + 3);
         QCOMPARE(actual[expected.size()].id, QString("GalGameTask"));
         QCOMPARE(actual[expected.size() + 1].id, QString("RahaiBlocksTask"));
-        QVERIFY(!actual[expected.size()].trigger && !actual[expected.size() + 1].trigger);
+        QCOMPARE(actual[expected.size() + 2].id, QString("CultivationTask"));
+        for (int i = expected.size(); i < actual.size(); ++i)
+            QVERIFY(!actual[i].trigger && bool(actual[i].step));
         for (int i = 0; i < expected.size(); ++i) {
             QCOMPARE(actual[i].id, expected[i].id);
             QCOMPARE(actual[i].trigger, expected[i].trigger);

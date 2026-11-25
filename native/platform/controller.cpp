@@ -1,4 +1,5 @@
 #include "controller.hpp"
+#include "browser_cloud.hpp"
 #include "controller_math_abi.hpp"
 #include "platform_workflow.hpp"
 #include "rust_core.hpp"
@@ -360,6 +361,11 @@ struct ControllerLifecycleSdk {
 };
 void Controller::connect() {
     std::lock_guard lock(mutex_);
+    if (browser_) {
+        if (!browser_->ready()) fail("网页云游戏画面尚未就绪");
+        connected_ = true;
+        return;
+    }
     ControllerLifecycleSdk sdk{*this};
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerConnect, {}, sdk);
 }
@@ -576,6 +582,7 @@ struct ControllerInputSdk {
 };
 void Controller::move(int x, int y) {
     std::lock_guard lock(mutex_);
+    if (browser_) { if (!cfg_.b("kmbox.dry_run")) browser_->move(x, y); return; }
     ControllerInputSdk sdk{*this};
     sdk.x = x;
     sdk.y = y;
@@ -583,6 +590,7 @@ void Controller::move(int x, int y) {
 }
 void Controller::absolute(int x, int y, int width, int height, const QString &gameEntryWindow) {
     std::lock_guard lock(mutex_);
+    if (browser_) { if (!cfg_.b("kmbox.dry_run")) browser_->move(x, y, width, height); return; }
     ControllerInputSdk sdk{*this};
     sdk.x = x;
     sdk.y = y;
@@ -593,6 +601,7 @@ void Controller::absolute(int x, int y, int width, int height, const QString &ga
 }
 void Controller::button(const QString &name, bool down, const QString &gameEntryWindow) {
     std::lock_guard lock(mutex_);
+    if (browser_) { if (!cfg_.b("kmbox.dry_run")) browser_->button(name, down); return; }
     ControllerInputSdk sdk{*this};
     sdk.name = &name;
     sdk.down = down;
@@ -602,6 +611,7 @@ void Controller::button(const QString &name, bool down, const QString &gameEntry
 }
 void Controller::key(int code, bool down) {
     std::lock_guard lock(mutex_);
+    if (browser_) { if (!cfg_.b("kmbox.dry_run")) browser_->key(code, down); return; }
     ControllerInputSdk sdk{*this};
     sdk.code = code;
     sdk.down = down;
@@ -609,6 +619,7 @@ void Controller::key(int code, bool down) {
 }
 void Controller::wheel(int steps) {
     std::lock_guard lock(mutex_);
+    if (browser_) { if (!cfg_.b("kmbox.dry_run")) browser_->wheel(steps); return; }
     ControllerInputSdk sdk{*this};
     sdk.steps = steps;
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerWheel, {}, sdk);
@@ -616,16 +627,19 @@ void Controller::wheel(int steps) {
 
 void Controller::probe() {
     std::lock_guard lock(mutex_);
+    if (browser_) return;
     ControllerLifecycleSdk sdk{*this};
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerProbe, {}, sdk);
 }
 void Controller::release() {
     std::lock_guard lock(mutex_);
+    if (browser_) { browser_->release(); return; }
     ControllerLifecycleSdk sdk{*this};
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerRelease, {}, sdk);
 }
 void Controller::close() noexcept {
     std::lock_guard lock(mutex_);
+    if (browser_) { browser_->release(); connected_ = false; return; }
     ControllerLifecycleSdk sdk{*this};
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerClose, {}, sdk);
 }
@@ -637,6 +651,9 @@ bool Controller::connected() {
 
 QJsonObject Controller::state() {
     std::lock_guard lock(mutex_);
+    if (browser_) return {{"connected", connected_}, {"absolute", true}, {"keyboard", true},
+                          {"protocol", "browser"}, {"capability", "云游戏网页键盘与鼠标"},
+                          {"dry_run", cfg_.b("kmbox.dry_run")}};
     ControllerProtocolSdk sdk{*this};
     rust::platformWorkflowRun(rust::WorkflowMethod::ControllerState, {}, sdk);
     return sdk.value;

@@ -489,7 +489,8 @@ double EchoFarm::rustTravel(int method) {
         }
         case rust::WorkflowOp::SelectEchoBookEntry: {
             out[0] = navigation_.selectBookEntry(int(a[0]), int(a[1]),
-                                                 a[2] != 0 ? QVector<int>{5, 10} : QVector<int>{});
+                                                 a[2] != 0 ? QVector<int>{5, 10} : QVector<int>{}, false,
+                                                 QStringList{"zhange", "qiangdi", "mengyan"}.at(int(a[3])));
             break;
         }
         case rust::WorkflowOp::SelectEchoBossLevel: {
@@ -836,7 +837,7 @@ double EchoFarm::rustTravel(int method) {
             out[0] = c_.streamedCapture;
             break;
         case rust::WorkflowOp::RestartEchoDomain: {
-            restartBossDomain(c_);
+            restartBossDomain(c_, [&] { return combat_.hasHealthBar(); });
             break;
         }
         case rust::WorkflowOp::FollowEchoBossDefault: {

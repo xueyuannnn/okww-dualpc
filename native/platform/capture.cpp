@@ -1,4 +1,5 @@
 #include "capture.hpp"
+#include "browser_cloud.hpp"
 #include "capture_math_abi.hpp"
 #include "platform_workflow.hpp"
 #include "windows_compat.hpp"
@@ -936,7 +937,7 @@ struct CaptureFlowSdk {
             c.ready_ = true;
             break;
         case rust::WorkflowOp::CaptureSourceDesktop:
-            out[0] = c.config_.s("capture.source") == "desktop";
+            out[0] = c.browser_ || c.config_.s("capture.source") == "desktop";
             break;
         case rust::WorkflowOp::CaptureThreadJoinable:
             out[0] = c.thread_.joinable();
@@ -948,7 +949,7 @@ struct CaptureFlowSdk {
             c.thread_ = std::thread(&Capture::run, &c);
             break;
         case rust::WorkflowOp::CaptureWaitStart:
-            out[0] = c.cv_.wait_for(*lock, std::chrono::seconds(int(a[0])),
+            out[0] = c.cv_.wait_for(*lock, std::chrono::seconds(c.browser_ ? 25 : int(a[0])),
                                     [this] { return run(rust::WorkflowMethod::CaptureStartReady)[0] != 0; });
             break;
         case rust::WorkflowOp::CaptureHasError:
@@ -981,13 +982,14 @@ struct CaptureFlowSdk {
                      {"fourcc", formatName(c.latest_->format)}};
             break;
         case rust::WorkflowOp::CaptureLocalBackendState:
-            state["backend"] = c.config_.s("capture.local_backend");
+            state["backend"] = c.browser_ ? "WEBRTC" : c.config_.s("capture.local_backend");
+            if (c.browser_) state["browser_capture"] = c.browser_->video() ? "video" : "page";
             break;
         case rust::WorkflowOp::CaptureCardBackendState:
             state["backend"] = c.config_.s("capture.backend");
             break;
         case rust::WorkflowOp::CaptureIsDxgi:
-            out[0] = c.config_.s("capture.local_backend") == "DXGI";
+            out[0] = c.browser_ || c.config_.s("capture.local_backend") == "DXGI";
             break;
         case rust::WorkflowOp::CaptureNegotiatedRequest:
             state["requested_fps"] = c.negotiatedFps_;
@@ -1031,7 +1033,7 @@ struct CaptureFlowSdk {
             out[0] = c.config_.s("capture.backend") == "DSHOW";
             break;
         case rust::WorkflowOp::CaptureRunDesktop:
-            c.runDesktop();
+            if (c.browser_) c.runBrowser(); else c.runDesktop();
             break;
         case rust::WorkflowOp::CaptureRunDs:
             c.runDs();
@@ -1057,6 +1059,7 @@ struct CaptureFlowSdk {
             case 0:
                 fail("采集线程已经启动");
             case 1:
+                if (c.browser_) fail(c.desktopRecovery_.isEmpty() ? "网页云游戏首帧获取超时" : c.desktopRecovery_);
                 fail("视频采集启动超时");
             case 2:
                 fail(c.error_);
@@ -1092,6 +1095,9 @@ void Capture::verifyUnchangedDesktop(i64 stamp) {
     sdk.stamp = stamp;
     sdk.run(rust::WorkflowMethod::CaptureVerifyUnchanged);
 }
+Capture::Capture(Config c, bool launchBrowser) : config_(std::move(c)), launchBrowser_(launchBrowser) {
+    if (config_.browserCloud()) browser_ = std::make_shared<CloudBrowser>();
+}
 void Capture::start() { CaptureFlowSdk{*this}.run(rust::WorkflowMethod::CaptureStart); }
 void Capture::stop() { CaptureFlowSdk{*this}.run(rust::WorkflowMethod::CaptureStop); }
 QString Capture::error() {
@@ -1125,6 +1131,38 @@ FramePtr Capture::next(uint64_t after) {
     return sdk.output;
 }
 void Capture::run() { CaptureFlowSdk{*this}.run(rust::WorkflowMethod::CaptureRun); }
+void Capture::runBrowser() {
+    browser_->prepare(config_.s("capture.cloud_browser"), launchBrowser_);
+    {
+        std::lock_guard lock(mutex_);
+        negotiatedFps_ = 30.;
+    }
+    const auto startupDeadline = nowNs() + (launchBrowser_ ? 18000000000LL : 7000000000LL);
+    bool delivered = false;
+    QString startupReason = "网页已连接，正在等待首帧";
+    while (!stopped()) {
+        const auto started = nowNs();
+        QImage image;
+        try {
+            image = browser_->frame();
+        } catch (const std::exception &e) {
+            startupReason = errorText(e);
+            desktopRecovery(startupReason);
+        }
+        if (!image.isNull()) {
+            const auto pixels = image.convertToFormat(QImage::Format_BGR888);
+            publish(pixels.constBits(), size_t(pixels.sizeInBytes()), pixels.width(), pixels.height(),
+                    int(pixels.bytesPerLine()), PixelFormat::BGR24, false, nowNs());
+            desktopRecovery({});
+            delivered = true;
+        } else if (!delivered && nowNs() > startupDeadline) {
+            fail("网页云游戏连接超时：" + startupReason +
+                 "。如果专用浏览器窗口还开着，请关闭该窗口后重试；云游戏登录状态会保留。");
+        }
+        if (image.isNull() && !browser_->ready()) std::this_thread::sleep_for(std::chrono::milliseconds(125));
+        else std::this_thread::sleep_until(std::chrono::steady_clock::time_point(std::chrono::nanoseconds(started + 33333333LL)));
+    }
+}
 
 struct CaptureDsRunSdk {
     Capture &c;

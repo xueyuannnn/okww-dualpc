@@ -288,6 +288,9 @@ impl Host {
                 if !self.skill_available(RESONANCE)? && (!animation || now - start > minimum) {
                     break;
                 }
+                if o[4] == 0. && !animation && clicked && now - click_time >= 2. {
+                    break;
+                }
                 if now - last_click > 0.1 {
                     if send_click && last_was_skill {
                         self.click(false, -1.)?;

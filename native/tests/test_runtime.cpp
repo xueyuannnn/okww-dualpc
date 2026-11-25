@@ -125,7 +125,6 @@ class RuntimeTests : public QObject {
             Templates templates(root+"/assets/coco_annotations.json");
             Profile profile(directory.path(),root+"/native/resources/catalog.json");
             profile.set("Monthly Card Config","Check Monthly Card",false);
-            profile.set("Cloud Game","Enabled",scenario!=0);
             Input input(h.config,{1920,1080},true,h.transport,h.execution);
             auto image=cv::Mat(1080,1920,CV_8UC3,cv::Scalar(0,0,0));
             TaskContext c(h.execution,input,templates,profile,[&]{return image;},
@@ -136,6 +135,7 @@ class RuntimeTests : public QObject {
                     lines.erase(std::remove_if(lines.begin(),lines.end(),[&](const auto &line){return !area.contains(line.center().toPoint());}),lines.end());
                     return lines;
                 });
+            c.browserCapture=scenario>=1;
             c.frame=image;c.state->loggedIn=true;
             QCOMPARE(c.login(),scenario>=2);
             QCOMPARE(c.state->loggedIn,scenario<2);
@@ -172,7 +172,7 @@ class RuntimeTests : public QObject {
         TaskContext c(h.execution,input,templates,profile,[] { return cv::Mat{}; },
             [](const cv::Mat &,QRect,double){return QVector<TextLine>{};});
         CombatVision vision(c,root+"/native/resources/characters.json");
-        profile.set("Cloud Game","Enabled",true);
+        c.browserCapture=true;
         for(const auto &name:QStringList{"has_target_cloud","no_target_cloud"}) {
             c.frame=cv::Mat(1080,1920,CV_8UC3,cv::Scalar(0,0,0));
             auto pattern=templates.pattern(name,{1920,1080});
@@ -180,7 +180,7 @@ class RuntimeTests : public QObject {
             pattern.copyTo(c.frame(cv::Rect(area.x(),area.y(),pattern.cols,pattern.rows)));
             QCOMPARE(vision.hasTarget(),name=="has_target_cloud");
         }
-        profile.set("Cloud Game","Enabled",false);
+        c.browserCapture=false;
         c.frame=cv::Mat(1080,1920,CV_8UC3,cv::Scalar(0,0,0));
         cv::rectangle(c.frame,{500,300,120,8},cv::Scalar(60,65,190),-1);
         for(int y=301;y<307;++y)for(int x=501;x<619;x+=2)c.frame.at<cv::Vec3b>(y,x)=cv::Vec3b(0,0,0);
@@ -208,8 +208,8 @@ class RuntimeTests : public QObject {
         c.desktopRecognitionMode="remote";
         c.observeDesktopImage({{"executable","Client-Win64-Shipping.exe"}});
         QVERIFY(!c.localDesktopGame);QVERIFY(c.streamedImage());
-        profile.set("Cloud Game","Enabled",true);c.localDesktopGame=true;
-        QVERIFY(c.streamedImage()); // An explicit cloud profile still takes precedence.
+        c.browserCapture=true;c.localDesktopGame=true;
+        QVERIFY(c.streamedImage()); // The dedicated browser uses cloud recognition.
     }
     void lilyReleasesHeavyOnTimeoutAndCancellation() {
         for (bool cancel : {false, true}) {

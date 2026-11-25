@@ -203,15 +203,20 @@ class RahaiBlocksTask(NativeActivity, BaseTask):
     def _reward(self):
         return self.ocr(.36, .216, .64, .29, match=re.compile(r"^获\s*得$"))
 
+    def _dismiss_help(self):
+        confirm = self.ocr(.41, .88, .59, .95, match=re.compile(r"确?认$"))
+        last_page = not confirm and self.ocr(.38, .90, .62, .96, match="切换至最后一页")
+        if not (confirm or last_page) or not self.ocr(.05, .28, .32, .35, match=re.compile(r"模式|方块")):
+            return False
+        if confirm:
+            self.click(confirm[0], after_sleep=.5)
+        else:
+            self.click(.75, .805, after_sleep=.5)
+        return True
+
     def _ready_board(self):
         # The first score challenge includes a manual and three guided clicks.
-        help_page = self.ocr(.05, .28, .32, .35, match=re.compile(r"积分模式|奖章模式|数据损坏方块"))
-        if help_page:
-            confirm = self.ocr(.41, .88, .59, .95, match="确认")
-            if confirm:
-                self.click(confirm[0], after_sleep=.5)
-            elif self.ocr(.38, .90, .62, .96, match=re.compile(r"切换至最后一页")):
-                self.click(.75, .805, after_sleep=.5)
+        if self._dismiss_help():
             return False
 
         for region, hint, target in (
@@ -276,7 +281,6 @@ class RahaiBlocksTask(NativeActivity, BaseTask):
             if not release_at_target:
                 self.log_warning(f"Placement preview did not match: slot={move.slot}, turns={move.turns}, "
                                  f"row={move.row}, col={move.col}")
-                self.screenshot("rahai_preview_mismatch")
             return release_at_target
         finally:
             try:
@@ -288,11 +292,18 @@ class RahaiBlocksTask(NativeActivity, BaseTask):
 
     def _play_board(self, interaction):
         misses = 0
+        stagnant = 0
         rejected = set()
         for _ in range(160):
             self.next_frame()
             board = self._playable_board() or self.wait_until(self._playable_board, time_out=2)
             if not board:
+                if self._reward():
+                    return
+                if self._dismiss_help():
+                    misses = 0
+                    rejected.clear()
+                    continue
                 if self.wait_until(self._reward, time_out=3):
                     return
                 raise ChallengeFailed("棋盘消失，未确认通关。")
@@ -303,6 +314,10 @@ class RahaiBlocksTask(NativeActivity, BaseTask):
                 raise ChallengeFailed("剩余方块无合法落点。")
             if not self._place(interaction, board, move):
                 misses += 1
+                if misses == 1 and self._dismiss_help():
+                    misses = 0
+                    rejected.clear()
+                    continue
                 rejected.add((move.slot, move.mask))
                 if misses >= 3:
                     raise ChallengeFailed("连续三次未能匹配落点预览。")
@@ -314,6 +329,7 @@ class RahaiBlocksTask(NativeActivity, BaseTask):
             self.log_info(f"Rahai Blocks: slot={move.slot + 1}, rotation={move.turns * 90}, "
                           f"cell=({move.row + 1},{move.col + 1}), lines={lines}")
             self.sleep(.95 if lines else .38)
+            actual = None
             for _ in range(4):
                 self.next_frame()
                 actual = self._read_board()
@@ -325,5 +341,10 @@ class RahaiBlocksTask(NativeActivity, BaseTask):
                     return
                 self.log_warning(f"Rahai Blocks: expected={expected:#018x}, "
                                  f"actual={hex(actual.mask) if actual else 'unrecognized'}")
-                raise ChallengeFailed("落块后棋盘与预期状态不符。")
+            if actual and actual.mask == board.mask and actual.fixed == board.fixed and actual.pieces == board.pieces:
+                stagnant += 1
+                if stagnant >= 4:
+                    raise ChallengeFailed("连续四次落块后棋盘没有变化。")
+            elif actual:
+                stagnant = 0
         raise ChallengeFailed("达到落块次数上限，未确认通关。")

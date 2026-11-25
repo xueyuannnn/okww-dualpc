@@ -171,7 +171,7 @@ struct CommonConfigSdk {
             out[0] = cfg.s("capture.source") == "desktop";
             break;
         case rust::WorkflowOp::CommonConfigSourceCode:
-            out[0] = QStringList{"card", "desktop"}.indexOf(cfg.s("capture.source"));
+            out[0] = QStringList{"card", "desktop", "browser"}.indexOf(cfg.s("capture.source"));
             break;
         case rust::WorkflowOp::CommonConfigLocalBackendCode:
             out[0] = QStringList{"DXGI", "WIN32"}.indexOf(cfg.s("capture.local_backend"));
@@ -341,7 +341,17 @@ Config Config::load(const QString &p) {
     CommonConfigSdk{c, &c, &p}.run(rust::WorkflowMethod::CommonConfigLoad);
     return c;
 }
-void Config::normalizeBox() { CommonConfigSdk{*this, this}.run(rust::WorkflowMethod::CommonConfigNormalize); }
+void Config::normalizeBox() {
+    CommonConfigSdk{*this, this}.run(rust::WorkflowMethod::CommonConfigNormalize);
+    auto capture = json["capture"].toObject();
+    if (capture["source"] == "desktop" && capture["recognition_mode"] == "cloud_window") {
+        capture["source"] = "browser";
+        capture["recognition_mode"] = "local";
+    }
+    capture.remove("cloud_window_target");
+    capture.remove("cloud_background");
+    json["capture"] = capture;
+}
 void Config::save(const QString &p) const {
     CommonConfigSdk{*this, nullptr, &p}.run(rust::WorkflowMethod::CommonConfigSave);
 }
@@ -360,6 +370,7 @@ void Config::validateCapture() const {
     CommonConfigSdk{*this}.run(rust::WorkflowMethod::CommonConfigValidateCapture);
 }
 void Config::validateBox() const {
+    if (browserCloud()) return;
     CommonConfigSdk{*this}.run(rust::WorkflowMethod::CommonConfigValidateBox);
 }
 QString formatName(PixelFormat f) {

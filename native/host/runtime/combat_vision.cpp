@@ -877,6 +877,37 @@ bool CombatVision::healthBar(bool inCombat) {
                    }
                })[0] != 0;
 }
+bool CombatVision::lowBossHealth() {
+    const auto &image = context_.frame;
+    if (image.empty())
+        return false;
+    // A finishing hit may leave a narrow orange/red sliver at the start
+    // of the boss bar. The lower stagger gauge is outside this band.
+    const auto band = relativeBox(image, .34, .042, .46, .072);
+    cv::Mat hsv, mask, red;
+    cv::cvtColor(image(cv::Rect(band.x(), band.y(), band.width(), band.height())), hsv, cv::COLOR_BGR2HSV);
+    cv::inRange(hsv, cv::Scalar(0, 105, 140), cv::Scalar(37, 255, 255), mask);
+    cv::inRange(hsv, cv::Scalar(174, 105, 140), cv::Scalar(179, 255, 255), red);
+    mask |= red;
+    cv::Mat labels, stats, centers;
+    const int components = cv::connectedComponentsWithStats(mask, labels, stats, centers);
+    for (int i = 1; i < components; ++i) {
+        const int x = stats.at<int>(i, cv::CC_STAT_LEFT) + band.x();
+        const int y = stats.at<int>(i, cv::CC_STAT_TOP) + band.y();
+        const int w = stats.at<int>(i, cv::CC_STAT_WIDTH);
+        const int h = stats.at<int>(i, cv::CC_STAT_HEIGHT);
+        if (x < image.cols * .347 || x > image.cols * .376 ||
+            y < image.rows * .045 || y > image.rows * .065 ||
+            w < std::max(3, pixelRound(image.cols * .002)) || w > image.cols * .11 ||
+            h < std::max(2, pixelRound(image.rows * .004)) || h > image.rows * .016 ||
+            stats.at<int>(i, cv::CC_STAT_AREA) < w * h * .55)
+            continue;
+        const auto title = relativeBox(image, .35, .002, .65, .048);
+        return enemyLevelConfirmed(context_.text(title, .65)) ||
+               (context_.streamedImage() && enemyLevelConfirmed(context_.textScaled(title, .65, 2.)));
+    }
+    return false;
+}
 bool CombatVision::shiftedHealthBar() {
     const auto &image = context_.frame;
     cv::Mat mask;

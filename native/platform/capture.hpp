@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include <functional>
 namespace okww {
+class CloudBrowser;
 struct Device {
     int index = 0;
     QString name, path;
@@ -26,6 +27,8 @@ class Capture {
     friend struct CaptureMfRunSdk;
     friend struct CaptureDesktopRunSdk;
     Config config_;
+    std::shared_ptr<CloudBrowser> browser_;
+    bool launchBrowser_ = false;
     std::thread thread_;
     std::mutex mutex_;
     std::condition_variable cv_;
@@ -43,14 +46,16 @@ class Capture {
     void runDs();
     void runMf();
     void runDesktop();
+    void runBrowser();
 
   public:
-    explicit Capture(Config c) : config_(std::move(c)) {}
+    explicit Capture(Config c, bool launchBrowser = false);
     ~Capture() { stop(); }
     void start();
     void stop();
     FramePtr next(uint64_t after);
     double fps();
+    std::shared_ptr<CloudBrowser> browser() const { return browser_; }
     FramePtr latest();
     QJsonObject actual();
     QString error();

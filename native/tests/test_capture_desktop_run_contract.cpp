@@ -25,6 +25,21 @@ class CaptureDesktopRunContracts final : public QObject {
                 QCOMPARE(bool(rust::okww_rs_capture_recovery_expired(base + elapsed, base)),
                          elapsed > INT64_C(120000000000));
     }
+    void selectedWindowPublishesFramesAfterResize() {
+        for (bool dxgi : {true, false}) {
+            const auto replay = capture_desktop_run_test::resizeOutcome(dxgi);
+            QVERIFY(replay["error"].toString().isEmpty());
+            QVERIFY(replay["recovery"].toString().isEmpty());
+            bool sawOriginal = false, sawResized = false;
+            for (const auto frame : replay["trace"].toArray()) {
+                const auto entry = frame.toObject();
+                sawOriginal |= entry["width"].toInt() == 1280 && entry["height"].toInt() == 720;
+                sawResized |= entry["width"].toInt() == 1600 && entry["height"].toInt() == 900;
+            }
+            QVERIFY(sawOriginal);
+            QVERIFY(sawResized);
+        }
+    }
 };
 QTEST_GUILESS_MAIN(CaptureDesktopRunContracts)
 #include "test_capture_desktop_run_contract.moc"

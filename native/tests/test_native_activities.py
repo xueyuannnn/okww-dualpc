@@ -7,6 +7,7 @@ import pytest
 import numpy as np
 
 from src.task.native_activity import NativeActivity
+from src.task.CultivationTask import CultivationError, CultivationTask, MaterialGoal
 from src.task.RahaiBlocksTask import RahaiBlocksTask
 from src.task.rahai_blocks import Board, Piece, choose_move
 
@@ -58,3 +59,29 @@ def test_activity_import_has_no_pynput_or_direct_input_escape_hatch():
     assert 'PynputInteraction' not in source
     assert 'pynput' not in source
     assert 'self.executor.interaction' in source
+
+
+def test_cultivation_skips_complete_and_exhausted_rows():
+    ascension, skill = CultivationTask.MATERIALS
+    task = object.__new__(CultivationTask)
+    task.goals = [MaterialGoal('突破', 2, 3, ascension), MaterialGoal('技能', 0, 3, skill, 0)]
+    assert task.pending_materials() == [ascension]
+    task.goals[0].owned = 3
+    assert task.pending_materials() == []
+
+
+def test_cultivation_requires_verified_single_claim():
+    task = object.__new__(CultivationTask)
+    task.read_claim_cost = Mock(return_value=None)
+    task.sleep = Mock()
+    task.click = Mock()
+    task.click_dialog_right_button = Mock()
+    task.ocr = Mock(side_effect=[[], []])
+    with pytest.raises(CultivationError, match='单倍领取'):
+        task.confirm_single_claim()
+    task.click.assert_not_called()
+    task.click_dialog_right_button.assert_not_called()
+
+    task.read_claim_cost.return_value = 60
+    task.confirm_single_claim()
+    task.click_dialog_right_button.assert_called_once()

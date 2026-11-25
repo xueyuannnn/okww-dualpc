@@ -101,7 +101,9 @@ impl Host {
             }
             Method::CommonConfigValidateCapture => {
                 let local = self.flag(Op::CommonConfigSourceDesktop, &[])?;
-                if self.scalar(Op::CommonConfigSourceCode, &[])? < 0. {
+                let source = self.scalar(Op::CommonConfigSourceCode, &[])?;
+                let card = source == 0.;
+                if source < 0. {
                     return self.common_config_fail(3.);
                 }
                 if local
@@ -121,10 +123,10 @@ impl Host {
                 {
                     return self.common_config_fail(5.);
                 }
-                if !local && self.scalar(Op::CommonConfigCardBackendCode, &[])? < 0. {
+                if card && self.scalar(Op::CommonConfigCardBackendCode, &[])? < 0. {
                     return self.common_config_fail(6.);
                 }
-                if !local
+                if card
                     && (self.config_integer(0)? < 2.
                         || self.config_integer(1)? < 2.
                         || self.config_integer(0)? > 8192.
@@ -135,7 +137,7 @@ impl Host {
                 {
                     return self.common_config_fail(7.);
                 }
-                if !local && !self.flag(Op::CommonConfigFormatNv12, &[])? {
+                if card && !self.flag(Op::CommonConfigFormatNv12, &[])? {
                     return self.common_config_fail(8.);
                 }
                 if self.config_integer(3)? < 1280.

@@ -98,7 +98,29 @@ template <class C> QJsonObject mutations(int seed) {
 class CommonConfigContracts final : public QObject {
     Q_OBJECT
   private slots:
-    void defaults() { QCOMPARE(Config::defaults().json, common_reference::Config::defaults().json); }
+    void defaults() {
+        auto expected = common_reference::Config::defaults();
+        expected.set("capture.recognition_mode", "local");
+        QCOMPARE(Config::defaults().json, expected.json);
+    }
+    void browserDoesNotRequireABoxOrDesktopTarget() {
+        auto config = Config::defaults();
+        config.set("capture.source", "browser");
+        config.set("kmbox.host", "invalid");
+        config.set("capture.device_index", -1);
+        config.set("capture.backend", "wrong");
+        config.set("capture.local_backend", "wrong");
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto path = directory.filePath("dualpc.json");
+        config.save(path);
+        const auto loaded = Config::load(path);
+        QVERIFY(loaded.browserCloud());
+        QCOMPARE(loaded.s("kmbox.protocol"), QString("kmbox_net"));
+        QCOMPARE(loaded.s("kmbox.host"), QString("invalid"));
+        config.set("capture.output_width", 100);
+        QVERIFY_THROWS_EXCEPTION(std::runtime_error, config.validateCapture());
+    }
     void validation_data() {
         QTest::addColumn<int>("seed");
         for (int i = 0; i < 2048; ++i)

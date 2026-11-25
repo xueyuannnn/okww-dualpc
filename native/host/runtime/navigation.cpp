@@ -5,6 +5,31 @@
 namespace okww::runtime {
 namespace {
 const QStringList guideTabs{"gray_book_quest", "gray_book_boss", "gray_book_weekly", "gray_book_all_monsters"};
+const QHash<QString, QString> guideCategories{
+    {"ningsu", "凝素领域|凝素領域|Forgery\\s*Challenge"},
+    {"moni", "模拟领域|模擬領域|Simulation\\s*Challenge"},
+    {"qiangdi", "讨伐强敌|討伐強敵|Boss\\s*Challenge"},
+    {"wuyin", "无音区|無音區|无音清剿|無音清剿|Tacet\\s*(?:Suppression|Fields?)"},
+    {"zhange", "战歌重奏|戰歌重奏|Weekly\\s*Challenge"},
+    {"canxiang", "残像聚落|殘像聚落|Tacet\\s*Discord\\s*Colon(?:y|ies)"},
+    {"mengyan", "特异梦魇|特異夢魘|Special\\s*Nightmare"}};
+
+std::optional<TextLine> guideCategoryLabel(TaskContext &c, const QString &name) {
+    return matchingText(c.text(.08, .18, .37, .90, .65), "^(?:" + guideCategories.value(name) + ")$");
+}
+QRect guideCategorySample(TaskContext &c, const QString &name) {
+    const auto label = guideCategoryLabel(c, name);
+    if (!label) return {};
+    const auto y = label->center().y() / c.frame.rows;
+    return gameBox(c.frame, .28, y - .012, .32, y + .012);
+}
+bool confirmedCategory(const cv::Mat &frame, const QRect &area) {
+    if (area.isEmpty() || !QRect(0, 0, frame.cols, frame.rows).contains(area)) return false;
+    cv::Mat bright;
+    cv::inRange(frame(cv::Rect(area.x(), area.y(), area.width(), area.height())),
+                cv::Scalar(145, 145, 145), cv::Scalar(255, 255, 255), bright);
+    return cv::countNonZero(bright) >= double(bright.total()) * .62;
+}
 
 [[noreturn]] void navigationError(int reason, const QString &name = {}) {
     switch (reason) {
@@ -72,6 +97,7 @@ struct NavigationBridge {
     QVector<TextLine> lines;
     QVector<Match> rows;
     QVector<BookRow> bookRows, previousBookRows;
+    QRect expectedBookCategory;
     QJsonArray bookObservations;
     QVector<Match> waypoints;
     QMap<QString, std::optional<Match>> guideMarkers;
@@ -118,7 +144,7 @@ struct NavigationBridge {
             return false;
         if (!teamVisible && c.findAny(guideTabs, {.threshold = .75, .search = guideSidebar(), .grayscale = true}))
             return true;
-        if (!c.streamedCapture)
+        if (!c.streamedCapture && !c.browserCapture)
             return false;
         int markers = 0;
         for (const auto &feature : guideTabs) {
@@ -133,7 +159,7 @@ struct NavigationBridge {
         const bool teamVisible = c.streamedCapture && c.localDesktopGame && c.inTeam();
         guideProbe = {{"frame_width", c.frame.cols}, {"frame_height", c.frame.rows},
                       {"standard_match", bool(match)}, {"team_hud_visible", teamVisible}};
-        if ((match && !teamVisible) || !c.streamedCapture || !guideTabs.contains(name))
+        if ((match && !teamVisible) || (!c.streamedCapture && !c.browserCapture) || !guideTabs.contains(name))
             return match;
 
         match = guideMarker(name);
@@ -196,7 +222,7 @@ struct NavigationBridge {
                     out[0] = c.canBackToWorld();
                     break;
                 case rust::WorkflowOp::DesktopCapture:
-                    out[0] = c.streamedCapture;
+                    out[0] = c.streamedCapture || c.browserCapture;
                     break;
                 case rust::WorkflowOp::LocalDesktopGuide:
                     out[0] = c.streamedCapture && c.localDesktopGame;
@@ -408,15 +434,7 @@ struct NavigationBridge {
                     break;
                 }
                 case rust::WorkflowOp::FindBookCategory: {
-                    const QHash<QString,QString> categories{
-                        {"ningsu","凝素领域|凝素領域|Forgery\\s*Challenge"},
-                        {"moni","模拟领域|模擬領域|Simulation\\s*Challenge"},
-                        {"qiangdi","讨伐强敌|討伐強敵|Boss\\s*Challenge"},
-                        {"wuyin","无音区|無音區|Tacet\\s*(?:Suppression|Fields?)"},
-                        {"zhange","战歌重奏|戰歌重奏|Weekly\\s*Challenge"},
-                        {"canxiang","残像聚落|殘像聚落|Tacet\\s*Discord\\s*Colon(?:y|ies)"},
-                        {"mengyan","特异梦魇|特異夢魘|Special\\s*Nightmare"}};
-                    label=matchingText(c.text(.08,.18,.37,.90,.65),"^(?:"+categories.value(name)+")$");
+                    label=guideCategoryLabel(c,name);
                     found=label ? std::optional<Match>{{"book_category",label->box,label->confidence}} : std::nullopt;
                     out[0]=found.has_value();
                     break;
@@ -561,6 +579,8 @@ struct NavigationBridge {
                 }
                 case rust::WorkflowOp::ReadProceedRows: {
                     c.refresh();
+                    if (!expectedBookCategory.isEmpty() && !confirmedCategory(c.frame, expectedBookCategory))
+                        throw NavigationFailure("当前已离开目标副本分类，暂停滚动和选行");
                     bookRows=readBookRows(c);
                     rows.clear();
                     for(const auto &row:bookRows)rows.append(row.button);
@@ -773,6 +793,12 @@ TextLine Navigation::selectMonster(const QString &name, int maxPages) {
 void Navigation::bookCategory(const QString &category, double after) {
     NavigationBridge b{c_};
     b.name = category;
+    if (c_.browserCapture && (category == "zhange" || category == "qiangdi")) {
+        ensureBookPage("gray_book_boss", category == "zhange" ? "战歌重奏" : "讨伐强敌",
+            [&] { return confirmedCategory(c_.frame, guideCategorySample(c_, category)); },
+            [&] { b.run(rust::WorkflowMethod::Category, {after}); });
+        return;
+    }
     b.run(rust::WorkflowMethod::Category, {after});
 }
 std::optional<Match> Navigation::waypoint() {
@@ -796,9 +822,16 @@ void Navigation::startChallenge() {
     NavigationBridge b{c_};
     b.run(rust::WorkflowMethod::StartChallenge);
 }
-bool Navigation::selectBookEntry(int serial, int total, const QVector<int> &structure, bool fromEnd) {
+bool Navigation::selectBookEntry(int serial, int total, const QVector<int> &structure, bool fromEnd,
+                                 const QString &expectedCategory) {
     NavigationBridge b{c_};
     b.structure = structure;
+    if (c_.browserCapture && (expectedCategory == "zhange" || expectedCategory == "qiangdi")) {
+        bookCategory(expectedCategory, .35);
+        b.expectedBookCategory = guideCategorySample(c_, expectedCategory);
+        if (!confirmedCategory(c_.frame, b.expectedBookCategory))
+            throw NavigationFailure("索拉指南未确认目标分类，未选择副本");
+    }
     return b.run(rust::WorkflowMethod::SelectEntry, {double(serial), double(total), double(fromEnd)})[0] != 0;
 }
 } // namespace okww::runtime

@@ -166,19 +166,19 @@ struct BackendLifecycleSdk {
             frame.reset();
             break;
         case rust::WorkflowOp::BackendStartCreateCapture:
-            b.capture_ = std::make_unique<Capture>(b.cfg_);
+            b.capture_ = std::make_unique<Capture>(b.cfg_, true);
             break;
         case rust::WorkflowOp::BackendStartCapture:
             b.capture_->start();
             break;
         case rust::WorkflowOp::BackendStartCreateBox:
-            b.box_ = std::make_unique<Controller>(b.cfg_);
+            b.box_ = std::make_unique<Controller>(b.cfg_, nullptr, b.capture_ ? b.capture_->browser() : nullptr);
             break;
         case rust::WorkflowOp::BackendStartBox:
             b.box_->connect();
             break;
         case rust::WorkflowOp::BackendStartLocalProtocol:
-            out[0] = b.cfg_.s("kmbox.protocol") == "sendinput";
+            out[0] = b.cfg_.s("kmbox.protocol") == "sendinput" || b.cfg_.browserCloud();
             break;
         case rust::WorkflowOp::BackendStartDryRun:
             out[0] = b.cfg_.b("kmbox.dry_run");
@@ -310,6 +310,10 @@ struct BackendFramesSdk {
     uint64_t *after = nullptr;
     QImage image;
     std::optional<std::unique_lock<std::recursive_mutex>> lock;
+    double staleAfter() const {
+        const auto configured = b.cfg_.d("capture.stale_after");
+        return b.cfg_.browserCloud() ? std::max(configured, .65) : configured;
+    }
     void operator()(rust::WorkflowOp op, const double *a, double *out, const std::exception_ptr &error) {
         switch (op) {
         case rust::WorkflowOp::BackendFrameHasCapture:
@@ -326,7 +330,7 @@ struct BackendFramesSdk {
             break;
         case rust::WorkflowOp::BackendFrameFresh:
             out[0] =
-                rust::okww_rs_frame_fresh(nowNs(), frame->captured, true, b.cfg_.d("capture.stale_after"));
+                rust::okww_rs_frame_fresh(nowNs(), frame->captured, true, staleAfter());
             break;
         case rust::WorkflowOp::BackendFrameClear:
             frame.reset();
@@ -418,7 +422,7 @@ struct BackendFramesSdk {
                              {"heartbeat_age_ms", b.heartbeat_ ? double(nowNs() - b.heartbeat_) / 1e6 : -1.},
                              {"frame_age_ms", frame ? double(nowNs() - frame->captured) / 1e6 : -1.},
                              {"frame_sequence", frame ? QString::number(frame->sequence) : QString{}},
-                             {"stale_after_ms", b.cfg_.d("capture.stale_after") * 1000},
+                             {"stale_after_ms", staleAfter() * 1000},
                              {"recovery_elapsed_ms",
                               b.captureRecoveryBegan_ ? double(nowNs() - b.captureRecoveryBegan_) / 1e6 : 0.},
                              {"capture_error", b.capture_ ? b.capture_->error() : QString{}},
@@ -628,7 +632,7 @@ struct BackendControlSdk {
             out[0] = b.armed_;
             break;
         case rust::WorkflowOp::BackendControlLocal:
-            out[0] = b.cfg_.s("kmbox.protocol") == "sendinput";
+            out[0] = b.cfg_.s("kmbox.protocol") == "sendinput" || b.cfg_.browserCloud();
             break;
         case rust::WorkflowOp::BackendControlLocalTestCounts:
             x = y = 40;
@@ -912,7 +916,7 @@ struct BackendDispatchSdk {
             }
             break;
         case rust::WorkflowOp::BackendRpcLocalProtocol:
-            out[0] = b.cfg_.s("kmbox.protocol") == "sendinput";
+            out[0] = b.cfg_.s("kmbox.protocol") == "sendinput" || b.cfg_.browserCloud();
             break;
         case rust::WorkflowOp::BackendRpcDisarmLocalError:
             try {

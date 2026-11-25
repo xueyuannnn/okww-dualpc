@@ -678,7 +678,11 @@ bool CombatSession::breakF(bool force) {
 }
 bool CombatSession::combatActive() { return rustRun(rust::SessionMethod::CombatActive) != 0; }
 void CombatSession::checkCombat() { rustRun(rust::SessionMethod::CheckCombat); }
-void CombatSession::resetCombat() { lastHealthSeen_ = -1; rustRun(rust::SessionMethod::ResetCombat); }
+void CombatSession::resetCombat() {
+    lastHealthSeen_ = -1;
+    supportHandoffTarget_ = -1;
+    rustRun(rust::SessionMethod::ResetCombat);
+}
 void CombatSession::updatePortraits() { rustRun(rust::SessionMethod::UpdatePortraits); }
 void CombatSession::switchNext(Character &previous, bool freeIntro, bool targetLowCon,
                                const SwitchAction &post) {
@@ -719,7 +723,27 @@ void CombatSession::switchNext(Character &previous, bool freeIntro, bool targetL
                     break;
                 }
                 case rust::SessionOp::ChooseDecision: {
-                    decision = chooseSwitch(previous.state, candidates, a[0] != 0, freezes, now());
+                    const auto timestamp = now();
+                    const bool intro = a[0] != 0;
+                    decision = chooseSwitch(previous.state, candidates, intro, freezes, timestamp);
+                    if (!macro_ && !intro && supportHandoffTarget_ == previous.state.index &&
+                        previous.state.role != Role::MainDps && decision.index != previous.state.index) {
+                        const auto chosen = std::find_if(candidates.begin(), candidates.end(), [&](const auto &entry) {
+                            return entry.character->index == decision.index;
+                        });
+                        std::vector<SwitchCandidate> damage;
+                        if (chosen != candidates.end() && chosen->character->role != Role::MainDps) {
+                            for (const auto &entry : candidates)
+                                if (entry.priority == chosen->priority && entry.character->role == Role::MainDps &&
+                                    (!entry.character->switchCoolingDown(freezes, timestamp) ||
+                                     chosen->character->switchCoolingDown(freezes, timestamp)))
+                                    damage.push_back(entry);
+                        }
+                        if (!damage.empty()) {
+                            decision = chooseSwitch(previous.state, damage, false, freezes, timestamp);
+                            decision.reason = "辅助切换后回到主输出";
+                        }
+                    }
                     out[0] = decision.index;
                     break;
                 }
@@ -783,6 +807,8 @@ void CombatSession::switchNext(Character &previous, bool freeIntro, bool targetL
                     break;
                 }
                 case rust::SessionOp::PreviousSwitchOut: {
+                    supportHandoffTarget_ = a[0] == 0 && previous.state.role != Role::MainDps &&
+                                                   target->state.role != Role::MainDps ? target->state.index : -1;
                     previous.switchOut(a[0] != 0);
                     break;
                 }

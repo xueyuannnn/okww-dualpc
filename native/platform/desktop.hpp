@@ -6,6 +6,8 @@ namespace okww {
 QJsonArray desktopTargets(bool windowsOnly = false);
 QJsonObject dxgiDisplay(const Config &config);
 QJsonObject desktopCaptureTarget(const Config &config);
+bool tracksLocalGameWindow(const Config &config);
+bool canResizeLocalGameWindow(const Config &config, QSize initial, QSize current);
 double displayRefreshRate(const QString &device);
 QRect foregroundClientRect();
 // Resolve saved identities once per connection; never follow a reused HWND.

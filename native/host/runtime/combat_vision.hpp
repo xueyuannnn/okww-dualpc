@@ -57,6 +57,7 @@ class CombatVision {
     TargetObservation targetObservation(bool allowShort = false, bool extended = false);
     const QJsonObject &targetEvidence() const { return targetEvidence_; }
     bool healthBar(bool inCombat);
+    bool lowBossHealth();
     bool shiftedHealthBar();
     bool deathDialog();
     std::optional<bool> challengeResult(); // true: success; false: failure

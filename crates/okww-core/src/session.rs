@@ -248,7 +248,8 @@ impl Host {
         self.bool(Bool::HealthCache)
     }
     fn target_enemy(&self) -> SessionResult<bool> {
-        if self.bool(Bool::Engaged)?
+        let engaged = self.bool(Bool::Engaged)?;
+        if engaged
             && self.flag(Op::InTeam, &[])?
             && self.flag(Op::SessionHealthBar, &[])?
         {
@@ -263,9 +264,23 @@ impl Host {
         } else {
             0.2
         };
-        while self.now()? - start < self.time(Time::TargetEnemyTimeout)? {
+        let local_retarget = engaged && self.flag(Op::LocalDesktopGame, &[])?;
+        let timeout = self.time(Time::TargetEnemyTimeout)?;
+        let timeout = if local_retarget {
+            timeout.min(0.65)
+        } else {
+            timeout
+        };
+        while self.now()? - start < timeout {
+            if local_retarget && !self.flag(Op::InTeam, &[])? {
+                return Ok(false);
+            }
             self.action(Op::ClickMiddle, &[interval])?;
-            if self.flag(Op::InTeam, &[])? && self.flag(Op::SessionHealthBar, &[])? {
+            let in_team = self.flag(Op::InTeam, &[])?;
+            if local_retarget && !in_team {
+                return Ok(false);
+            }
+            if in_team && self.flag(Op::SessionHealthBar, &[])? {
                 return Ok(true);
             }
             if self.flag(Op::TargetLocked, &[])? {

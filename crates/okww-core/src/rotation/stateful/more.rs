@@ -99,7 +99,7 @@ impl Host {
             }
             self.stateful_cycle()?;
             if self.state(INTRO)? == 0. && self.suisui_try_e()? {
-                return self.stateful_switch();
+                return Ok(());
             }
             self.click(false, -1.)?;
             self.stateful_cycle_end()?;

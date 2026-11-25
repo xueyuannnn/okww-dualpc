@@ -483,7 +483,8 @@ bool CombatSession::rustAccess(rust::SessionOp op, const double *a, double *out,
         out[0] = vision_.healthBar(a[0] != 0);
         return true;
     case O::ShiftedHealthBar:
-        out[0] = vision_.shiftedHealthBar();
+        out[0] = (engaged_ && (echoFinishAssist() || (context_.streamedCapture && context_.localDesktopGame)) &&
+                  vision_.lowBossHealth()) || vision_.shiftedHealthBar();
         return true;
     case O::SessionHealthBar:
         out[0] = healthBar();
@@ -496,6 +497,12 @@ bool CombatSession::rustAccess(rust::SessionOp op, const double *a, double *out,
         return true;
     case O::DesktopCapture:
         out[0] = context_.streamedCapture;
+        return true;
+    case O::LocalDesktopGame:
+        out[0] = context_.streamedCapture && context_.localDesktopGame;
+        return true;
+    case O::EchoFinishAssist:
+        out[0] = echoFinishAssist();
         return true;
     case O::LastHealthSeen:
         out[0] = lastHealthSeen_;

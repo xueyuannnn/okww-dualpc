@@ -78,6 +78,34 @@ class ClassicUiTests final : public QObject {
         } catch(const std::exception &error) { QFAIL(error.what()); }
     }
 
+    void cloudOffersOnlyTheDedicatedBrowserAndKeepsThePreviousInputSelection() {
+        QTemporaryDir data;
+        auto window = create(data);
+        navigate(*window, "dualpc");
+        const auto capture = window->findChild<QComboBox *>("captureSource");
+        const auto protocol = window->findChild<QComboBox *>("boxProtocol");
+        const auto browser = window->findChild<QComboBox *>("cloudBrowserChoice");
+        QVERIFY(capture && protocol && browser);
+        protocol->setCurrentIndex(protocol->findData("sendinput"));
+        capture->setCurrentIndex(capture->findData("browser"));
+        browser->setCurrentIndex(browser->findData("chrome"));
+        QTRY_VERIFY(browser->isVisible());
+        QVERIFY(protocol->isHidden());
+        QVERIFY(!window->findChild<QComboBox *>("cloudWindowTarget"));
+        QVERIFY(!window->findChild<QCheckBox *>("cloudBackground"));
+        QVERIFY(!window->findChild<QPushButton *>("openBrowserCloud"));
+        const auto path = data.filePath("native-device-settings.json");
+        QTRY_VERIFY(QFile::exists(path));
+        const Config draft{readJson(path)["config"].toObject()};
+        QVERIFY(draft.browserCloud());
+        QCOMPARE(draft.s("capture.cloud_browser"), QString("chrome"));
+        QCOMPARE(draft.s("kmbox.protocol"), QString("sendinput"));
+        capture->setCurrentIndex(capture->findData("DXGI_REMOTE"));
+        QVERIFY(protocol->isVisible());
+        QVERIFY(!browser->isVisible());
+        QCOMPARE(protocol->currentData().toString(), QString("sendinput"));
+    }
+
     void bossDestinationIsSelectableAndPersistsSeparatelyFromBehavior_data() {
         QTest::addColumn<QString>("task");
         QTest::newRow("base") << QString("FarmEchoTask");
@@ -1915,7 +1943,7 @@ class ClassicUiTests final : public QObject {
         for(int i=0;i<2;++i){protocols->setCurrentIndex(i);QCOMPARE(boxForms->currentIndex(),i);}
         auto capture=window->findChild<QComboBox *>("captureSource");
         auto forms=window->findChild<QStackedWidget *>("captureSourceForms");
-        QVERIFY(capture && forms);QCOMPARE(capture->count(),3);QCOMPARE(forms->count(),2);
+        QVERIFY(capture && forms);QCOMPARE(capture->count(),4);QCOMPARE(forms->count(),3);
         QCOMPARE(capture->itemData(0).toString(),QString("card"));
         QCOMPARE(capture->itemData(1).toString(),QString("DXGI_LOCAL"));
         QCOMPARE(capture->itemData(2).toString(),QString("DXGI_REMOTE"));

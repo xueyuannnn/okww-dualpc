@@ -535,6 +535,20 @@ QJsonObject desktopCaptureTarget(const Config &config) {
     return sdk.value;
 }
 
+bool tracksLocalGameWindow(const Config &config) {
+    return config.s("capture.source") == "desktop" && config.s("capture.recognition_mode") == "local" &&
+           config.get("capture.local_target").toObject()["kind"] == "window" &&
+           config.get("capture.crop").toArray().isEmpty();
+}
+
+bool canResizeLocalGameWindow(const Config &config, QSize initial, QSize current) {
+    const auto supported = [](QSize size) {
+        return size.width() >= 1280 && size.height() >= 720 && size.width() <= 8192 && size.height() <= 8192 &&
+               std::abs(size.width() * 9 - size.height() * 16) <= 16;
+    };
+    return tracksLocalGameWindow(config) && supported(initial) && supported(current);
+}
+
 static void desktopIdentityFailure(int kind) {
     switch (kind) {
     case 0:

@@ -8,6 +8,9 @@ class ScriptDisabled final : public std::runtime_error {
 };
 QJsonObject scriptManage(const QString &root, const QString &data, QJsonObject request);
 QJsonArray scriptCatalog(const QString &data);
+class CombatSession;
+int runCultivationActivity(TaskContext &context, CombatSession &combat, const QString &root,
+                           const QString &data, std::optional<int> dailyBudget = {});
 QString recordedScript(const QJsonArray &events, QString name = "RecordedTask");
 class ScriptRuntime {
     TaskContext &c_;

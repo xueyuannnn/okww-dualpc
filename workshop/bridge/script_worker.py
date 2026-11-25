@@ -58,7 +58,7 @@ def create_runtime(root, data, channel, activity_only=False):
                       screenshots_folder=str(data / 'screenshots'))
         config['windows']['start_exe'] = False
         if activity_only:
-            # These two workflows read the host's OCRv6 result. Do not start a
+            # These workflows read the host's OCRv6 result. Do not start a
             # second model loader; generic scripts retain their original OCR.
             config['ocr'] = None
         config['template_matching'] = dict(config['template_matching'],
@@ -122,7 +122,7 @@ def run_script(runtime, data, request, channel):
     from ok.task.exceptions import FinishedException
     from ok import og
     task_manager = og.task_manager
-    builtin = {'activity:GalGameTask': 'GalGameTask', 'activity:RahaiBlocksTask': 'RahaiBlocksTask'}
+    builtin = {f'activity:{name}': name for name in ('GalGameTask', 'RahaiBlocksTask', 'CultivationTask')}
     if request['script'] in builtin:
         class_name = builtin[request['script']]
         task = next((task for task in runtime.task_executor.get_all_tasks()
@@ -139,7 +139,10 @@ def run_script(runtime, data, request, channel):
         raise ValueError(error)
     from ok import TriggerTask
     # Trigger predicates and run() must observe the same iteration's settings.
-    for key, value in request.get('values', {}).items():
+    values = dict(request.get('values', {}))
+    if request['script'] == 'activity:CultivationTask':
+        task.daily_waveplate_budget = values.pop('Daily Waveplate Budget', None)
+    for key, value in values.items():
         task.config[key] = value
     task._enabled = True
     task.unpause()
@@ -162,7 +165,7 @@ def run_script(runtime, data, request, channel):
         else:
             original_run_task(cls)
     task.run_task_by_class = run_task
-    handled = False
+    run_result = None
     try:
         executor.reset_scene(check_enabled=False)
         executor.interaction.on_run()
@@ -174,7 +177,7 @@ def run_script(runtime, data, request, channel):
         # run(). Otherwise a false predicate can retain the previous iteration's
         # cached picture forever and never observe that the game has changed.
         if not isinstance(task, TriggerTask) or task.should_trigger():
-            handled = bool(task.run())
+            run_result = task.run()
     except FinishedException:
         pass
     finally:
@@ -184,9 +187,12 @@ def run_script(runtime, data, request, channel):
         task._enabled = False
         executor.current_task = None
         runtime.device_manager.interaction.client.release_all()
-    return dict(handled=handled, name=task.name, description=task.description,
+    result = dict(handled=bool(run_result), name=task.name, description=task.description,
                 trigger_interval=task.trigger_interval,
                 fields=__import__('scripts_store').fields(dict(task.config), task.config_description, task.config_type))
+    if request['script'] == 'activity:CultivationTask' and type(run_result) is int:
+        result['spent_waveplates'] = run_result
+    return result
 
 
 def main():

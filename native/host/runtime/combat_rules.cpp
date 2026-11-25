@@ -249,6 +249,44 @@ RingResult countRing(const cv::Mat &bgr, ColorRange color, double minBoundingAre
 QRect Concerto::region(QSize screen) {
     return Templates::anchored({1431, 1942, 126, 126}, {3840, 2160}, screen, true, false);
 }
+namespace {
+double concertoCoverage(const cv::Mat &image, ColorRange color) {
+    constexpr int bins = 72;
+    // Normalize the small HUD crop so the support per angle is comparable at
+    // different resolutions and scaling settings.
+    cv::Mat crop, hsv;
+    cv::resize(image, crop, {63, 63}, 0, 0, cv::INTER_LINEAR);
+    cv::cvtColor(crop, hsv, cv::COLOR_BGR2HSV);
+    cv::Mat centerColor(1, 1, CV_8UC3, (color.lower + color.upper) * .5);
+    cv::cvtColor(centerColor, centerColor, cv::COLOR_BGR2HSV);
+    const int hue = centerColor.at<cv::Vec3b>(0, 0)[0];
+    static const auto angles = [] {
+        std::array<int, 63 * 63> lookup{};
+        lookup.fill(-1);
+        for (int y = 0; y < 63; ++y)
+            for (int x = 0; x < 63; ++x) {
+                const double r = std::hypot(x - 31, y - 31);
+                if (r >= 63 * .35119 && r <= 63 * .42261 + 1)
+                    lookup[y * 63 + x] = int((std::atan2(x - 31, 31 - y) / CV_PI + 2) * (bins / 2)) % bins;
+            }
+        return lookup;
+    }();
+    std::array<int, bins> counts{};
+    for (int y = 0; y < hsv.rows; ++y) {
+        const auto *row = hsv.ptr<cv::Vec3b>(y);
+        for (int x = 0; x < hsv.cols; ++x) {
+            const auto pixel = row[x];
+            const int bin = angles[y * 63 + x], delta = std::abs(int(pixel[0]) - hue);
+            if (bin >= 0 && std::min(delta, 180 - delta) <= 8 && pixel[1] >= 100 && pixel[2] >= 170)
+                ++counts[bin];
+        }
+    }
+    int covered = 0;
+    for (int i = 0; i < bins; ++i)
+        covered += counts[i] >= 3 || (counts[(i + bins - 1) % bins] >= 3 && counts[(i + 1) % bins] >= 3);
+    return double(covered) / bins;
+}
+} // namespace
 double Concerto::detect(const cv::Mat &frame, CharacterState &character) {
     QRect box;
     return rust::workflowRun(
@@ -282,11 +320,8 @@ double Concerto::detect(const cv::Mat &frame, CharacterState &character) {
                 out[0] = frame.rows;
                 break;
             case rust::WorkflowOp::ConcertoCountRing: {
-                const auto ring = countRing(frame(cv::Rect(box.x(), box.y(), box.width(), box.height())),
-                                            concertoColors()[character.ringIndex], a[0]);
-                out[0] = ring.area;
-                out[1] = ring.full;
-                out[2] = ring.components;
+                out[0] = concertoCoverage(frame(cv::Rect(box.x(), box.y(), box.width(), box.height())),
+                                          concertoColors()[character.ringIndex]);
                 break;
             }
             case rust::WorkflowOp::ConcertoSetFullArea:

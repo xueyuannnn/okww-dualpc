@@ -52,7 +52,7 @@ struct Probe {
     void event(O op,double v=0){events.append(QJsonArray{int(op),v,time});}
     void invoke(O op,const double *a,double *out,const std::exception_ptr &error){
         switch(op){
-        case O::CloudMode:case O::StreamedImage:case O::DesktopCapture:out[0]=false;break;
+        case O::CloudMode:case O::StreamedImage:case O::DesktopCapture:case O::LocalDesktopGame:out[0]=false;break;
         case O::GetBool:out[0]=booleans.at(int(a[0]));break;
         case O::SetBool:booleans.at(int(a[0]))=a[1]!=0;events.append(QJsonArray{int(op),a[0],a[1],time});break;
         case O::GetTime:out[0]=times.at(int(a[0]));break;
@@ -124,6 +124,7 @@ struct Probe {
         case O::FindLiberationPortrait:out[0]=(scene&32)!=0;event(op,a[0]);break;
         case O::SetMemberLiberationReady:liberation.at(int(a[0]))=true;event(op,a[0]);break;
         case O::TaskIdMatch:out[0]=scene%4==int(a[0]);break;
+        case O::EchoFinishAssist:out[0]=0;break; // Compare pre-existing behavior with the 4C assist disabled.
         case O::HealerTaskSetting:out[0]=(scene&16)!=0;event(op);break;
         case O::HealerGlobalSetting:out[0]=(scene&32)!=0;event(op);break;
         case O::PythonHealer:out[0]=(scene+(a[0]<0?scene%3:int(a[0])))%5==0;event(op,a[0]);break;
