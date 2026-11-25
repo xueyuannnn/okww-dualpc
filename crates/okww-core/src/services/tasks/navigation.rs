@@ -550,7 +550,22 @@ impl Host {
         let mut count = 0_usize;
         let mut top_ready = false;
         let [wheel_x, wheel_y] = BOOK_WHEEL_POINT;
+        // A category can already be at its first page. Observe it before
+        // issuing a reset that would restart the list's rebound animation.
+        if !from_end {
+            count = self.scalar(Op::ReadProceedRows, &[])? as usize;
+            if count > 0 && self.flag(Op::BookAtTop, &[total])? {
+                self.action(Op::StoreBookRows, &[])?;
+                self.action(Op::Sleep, &[0.2])?;
+                let observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
+                top_ready = observed == count && self.book_page_same(count)?;
+                count = observed;
+            }
+        }
         for reset in 0..3 {
+            if top_ready {
+                break;
+            }
             self.action(
                 Op::Scroll,
                 &[if from_end { -100. } else { 100. }, wheel_x, wheel_y],

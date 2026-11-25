@@ -219,7 +219,7 @@ bool WorldInteraction::walkToEcho(double timeout, double threshold, const std::f
     return false;
 }
 void WorldInteraction::centerCamera() {
-    c_.input.click(QPointF(c_.frame.cols * .5, c_.frame.rows * .5), .2, "middle");
+    c_.input.click({}, .2, "middle");
     c_.sleep(1);
 }
 std::pair<bool, bool> WorldInteraction::findEcho(bool useColor, bool turn, double timeout, double threshold,

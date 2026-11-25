@@ -211,6 +211,9 @@ Http browserConnection(HINTERNET httpSession, const QString &profile, QString &e
     QFile active(profile + "/DevToolsActivePort");
     if (!active.open(QIODevice::ReadOnly)) return http(nullptr);
     const auto lines = active.read(256).replace('\r', "").split('\n');
+    // Chromium replaces this file when its debugging listener starts. Keeping
+    // it open during HTTP retries can prevent that replacement on Windows.
+    active.close();
     bool valid = false;
     const int port = lines.value(0).toInt(&valid);
     const auto identity = lines.value(1);
@@ -369,6 +372,10 @@ void ensureCloudPage(const BrowserInstallation &browser) {
         return;
     }
     if (!QDir().mkpath(browser.profile)) fail("无法创建云游戏浏览器配置目录");
+    if (profileInUse(browser.profile)) return;
+    const auto staleRecord=browser.profile+"/DevToolsActivePort";
+    if(QFile::exists(staleRecord) && !QFile::remove(staleRecord))
+        fail("无法清理过期的浏览器连接记录，请关闭专用云游戏浏览器后重试；登录状态会保留");
     const QStringList args{"--user-data-dir=" + QDir::toNativeSeparators(browser.profile), "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
                            "--window-size=1920,1080", "--force-color-profile=srgb", "--force-device-scale-factor=1",
                            "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
@@ -384,7 +391,7 @@ void CloudBrowser::prepare(const QString &preference, bool openIfNeeded) {
     profile_ = browser.profile;
     if (openIfNeeded) ensureCloudPage(browser);
     else if (!QFileInfo::exists(profile_ + "/DevToolsActivePort"))
-        fail("请先打开专用 " + name_ + "，然后再检查采集。");
+        fail("请先点击“打开云游戏浏览器”，在专用 " + name_ + " 登录后再点“开始”。");
 }
 
 struct CloudBrowser::Session {

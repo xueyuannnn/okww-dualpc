@@ -96,7 +96,7 @@ impl Host {
             return self.fail(301.);
         }
         self.action(Op::Sleep, &[0.5])?;
-        let team = self.flag(Op::NestInterfaceTeam, &[])?;
+        let mut team = self.flag(Op::NestInterfaceTeam, &[])?;
         if team {
             self.action(Op::NavStartChallenge, &[])?;
             self.flag(Op::NestWaitTeam, &[120., 1.])?;
@@ -105,17 +105,31 @@ impl Host {
                 return Ok(());
             }
             self.action(Op::Sleep, &[1.])?;
-            let mut prompts = 0;
-            while self.flag(Op::NestInteractVisible, &[])? {
-                prompts += 1;
-                if prompts > 12 {
-                    return self.fail(302.);
-                }
+        }
+        // Teleporting only reaches the map. Confirm the entrance and an actual
+        // fight before running rotations or the post-combat echo search.
+        let mut engaged = false;
+        for _ in 0..6 {
+            if self.flag(Op::NestInterfaceTeam, &[])? {
+                self.action(Op::NavStartChallenge, &[])?;
+                self.flag(Op::NestWaitTeam, &[120., 1.])?;
+                team = true;
+            } else if self.flag(Op::CombatActive, &[])? {
+                engaged = true;
+                break;
+            } else if self.flag(Op::NestInteractVisible, &[])? {
                 self.action(Op::Key, &[6., 1.])?;
-                self.flag(Op::NestWaitTeam, &[40., 0.])?;
+            } else if !self.flag(Op::NestWalkApproach, &[])? {
+                break;
             }
-            self.action(Op::Sleep, &[2.])?;
-            self.action(Op::NestWalkApproach, &[])?;
+            self.action(Op::Sleep, &[0.2])?;
+        }
+        if !engaged {
+            self.action(Op::MarkNestUnreachable, &[])?;
+            if self.flag(Op::HasInfo, &[])? {
+                self.action(Op::NestSkippedInfo, &[])?;
+            }
+            return Ok(());
         }
         let mut wait = 10.;
         for _wave in 0..30 {

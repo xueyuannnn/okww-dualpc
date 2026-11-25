@@ -166,7 +166,7 @@ struct BackendLifecycleSdk {
             frame.reset();
             break;
         case rust::WorkflowOp::BackendStartCreateCapture:
-            b.capture_ = std::make_unique<Capture>(b.cfg_, true);
+            b.capture_ = std::make_unique<Capture>(b.cfg_);
             break;
         case rust::WorkflowOp::BackendStartCapture:
             b.capture_->start();

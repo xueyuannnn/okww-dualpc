@@ -209,6 +209,10 @@ class Window final : public QMainWindow {
     QStackedWidget *boxForms_ = nullptr;
     QStackedWidget *captureForms_ = nullptr;
     QComboBox *cloudBrowser_ = nullptr;
+    QPushButton *openCloudBrowser_ = nullptr;
+    QString openedCloudBrowserPreference_;
+    void openCloudBrowser();
+    void showCloudGameHint(const QString &text);
     QComboBox *captureSource_ = nullptr, *localCaptureTarget_ = nullptr,
               *dxgiMonitor_ = nullptr, *dxgiCaptureFps_ = nullptr, *localInputTarget_ = nullptr;
     QLabel *dxgiRefresh_ = nullptr;

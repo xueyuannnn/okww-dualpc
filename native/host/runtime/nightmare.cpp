@@ -1,6 +1,12 @@
 #include "nightmare.hpp"
 #include "workflow_abi.hpp"
 namespace okww::runtime {
+namespace {
+bool nestTeamScreen(TaskContext &c) {
+    return !c.inTeam() && c.find("team_close", {.threshold=.8}).has_value() &&
+        c.find("team_start_challenge", {.threshold=.75}).has_value();
+}
+}
 std::optional<NestTarget> nextNestTarget(const QVector<TextLine> &lines, QSize screen, int tab,
                                          const QSet<QString> &unreachable) {
     const QRegularExpression count("(?<!\\d)(\\d{1,2})\\s*[/／]\\s*(\\d{1,2})(?!\\d)");
@@ -212,12 +218,12 @@ std::array<double, 3> NightmareFarm::rustRun(int method, std::initializer_list<d
                 break;
             }
             case rust::WorkflowOp::FindNestInterface: {
-                feature = c_.findAny({"fast_travel_custom", "gray_teleport", "remove_custom", "team_start_challenge", "team_close"});
-                out[0] = feature.has_value();
+                feature = c_.findAny({"fast_travel_custom", "gray_teleport", "remove_custom"});
+                out[0] = feature.has_value() || nestTeamScreen(c_);
                 break;
             }
             case rust::WorkflowOp::NestInterfaceTeam: {
-                out[0] = feature->name == "team_close" || feature->name == "team_start_challenge";
+                out[0] = nestTeamScreen(c_);
                 break;
             }
             case rust::WorkflowOp::NavStartChallenge: {
@@ -230,13 +236,20 @@ std::array<double, 3> NightmareFarm::rustRun(int method, std::initializer_list<d
             }
             case rust::WorkflowOp::NestWalkApproach: {
                 double last = -1;
-                world_.walkUntil(
+                world_.centerCamera();
+                out[0] = world_.walkUntil(
                     [&] {
+                        if (nestTeamScreen(c_) || findInteract(c_)) return true;
                         const auto tick = rustRun(int(rust::WorkflowMethod::NestSeekTick), {last});
                         last = tick[1];
                         return tick[0] != 0;
                     },
-                    "w", 10);
+                    "w", 12);
+                if (!out[0]) {
+                    if (c_.info) c_.info("聚落导航", "未到达入口或未确认敌人，本轮跳过，不搜索声骸");
+                    if (c_.diagnostic) c_.diagnostic("聚落入口未确认", {{"target",target ? target->key : QString{}},
+                        {"phase","approach"},{"combat_started",false}});
+                }
                 break;
             }
             case rust::WorkflowOp::NestCombatRound: {

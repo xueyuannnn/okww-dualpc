@@ -10,6 +10,22 @@ using namespace okww;
 class NativeTests : public QObject {
     Q_OBJECT
   private slots:
+    void explicitCloudBrowserStartupProbe() {
+        const auto preference=qEnvironmentVariable("OKWW_CLOUD_STARTUP_PROBE");
+        if(preference.isEmpty())QSKIP("Explicit opt-in browser startup diagnostic");
+        CloudBrowser browser;
+        browser.prepare(preference,true);
+        QElapsedTimer timer;timer.start();
+        QString last;
+        while(timer.elapsed()<20000) {
+            try {
+                const auto frame=browser.frame();
+                if(!frame.isNull()) {QCOMPARE(frame.size(),QSize(1920,1080));return;}
+            } catch(const std::exception &error) {last=errorText(error);}
+            QTest::qWait(125);
+        }
+        QFAIL(qPrintable(last));
+    }
     void browserSelectionFollowsWindowsOrExplicitChoice() {
         QCOMPARE(cloudBrowserChoice("auto", "ChromeHTML", true, true), QString("chrome"));
         QCOMPARE(cloudBrowserChoice("auto", "MSEdgeHTM", true, true), QString("edge"));

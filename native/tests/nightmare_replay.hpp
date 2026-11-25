@@ -83,7 +83,7 @@ void leaveNest(TaskContext &c);
 struct Probe {
     int scene, rounds = 0, prompts = 0, activeCalls = 0;
     double time = 0;
-    bool travelClicked = false, world = false, capture = false, captured = false;
+    bool travelClicked = false, world = false, capture = false, captured = false, challengeStarted = false;
     QSet<QString> unreachable;
     QMap<QString, int> deaths;
     QJsonObject config;
@@ -227,7 +227,7 @@ struct Probe {
                     out[0] = feature.has_value();
                     break;
                 case O::NestInterfaceTeam:
-                    out[0] = feature->name == "team_close";
+                    out[0] = (scene & 1) && !challengeStarted;
                     break;
                 case O::NavStartChallenge:
                     nav.startChallenge();
@@ -237,7 +237,7 @@ struct Probe {
                     break;
                 case O::NestWalkApproach: {
                     double last = -1;
-                    interaction.walkUntil(
+                    out[0] = interaction.walkUntil(
                         [&] {
                             const auto tick = rustRun(rust::WorkflowMethod::NestSeekTick, {last});
                             last = tick[1];
@@ -490,7 +490,7 @@ inline bool Navigation::waitTeam(double timeout, bool required) {
     c.p.event("wait_team", QJsonArray{timeout, required});
     return c.p.scene % 9 != 0;
 }
-inline void Navigation::startChallenge() { c.p.event("start"); }
+inline void Navigation::startChallenge() { c.p.event("start"); c.p.challengeStarted=true; }
 inline void Navigation::ensureMain() {
     c.p.event("main");
     if (c.p.scene % 41 == 0)

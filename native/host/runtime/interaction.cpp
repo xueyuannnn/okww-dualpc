@@ -658,7 +658,8 @@ void WorldInteraction::centerCamera() {
                       [&](rust::WorkflowOp op, const double *a, double *out) {
                           switch (op) {
                           case rust::WorkflowOp::WorldCenterMiddleClick: {
-                              c_.input.click(QPointF(c_.frame.cols * .5, c_.frame.rows * .5), .2, "middle");
+                              // Camera input must not home the menu pointer first.
+                              c_.input.click({}, .2, "middle");
                               break;
                           }
                           case rust::WorkflowOp::Sleep: {

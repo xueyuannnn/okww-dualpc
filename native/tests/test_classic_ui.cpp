@@ -8,6 +8,11 @@
 using namespace okww;
 namespace okww {
 struct WindowStartupTestAccess {
+    static void start(Window &window) { window.startTask(); }
+    static bool pending(const Window &window) { return window.pendingStart_.has_value(); }
+    static void previewState(Window &window,bool automatic) {
+        window.devicesRunning_=true;window.automation_=automatic;window.updateStartControl();
+    }
     static bool ready(const Window &window) { return window.engineReady_; }
     static bool fieldsSaved(const Window &window) { return window.pendingFieldWrites_ == 0; }
     static void holdEngine(Window &window) { window.engineReady_ = false; window.engineLoadError_.clear(); }
@@ -61,6 +66,23 @@ class ClassicUiTests final : public QObject {
         return runtime::Profile(data.path() + "/configs-dualpc", root + "/native/resources/catalog.json");
     }
   private slots:
+    void cloudStartRequiresTheManualBrowserButtonBeforeConnecting() {
+        QTemporaryDir data;int connections=0;
+        auto window=create(data,[&](Backend &,const Config &){++connections;});
+        auto capture=window->findChild<QComboBox *>("captureSource");
+        capture->setCurrentIndex(capture->findData("browser"));
+        WindowStartupTestAccess::start(*window);
+        auto dialog=window->findChild<QMessageBox *>("cloudBrowserRequired");
+        QVERIFY(dialog && dialog->text().contains("打开云游戏浏览器"));
+        QVERIFY(dialog->text().contains("进入游戏后再启动"));
+        QCOMPARE(connections,0);QVERIFY(!WindowStartupTestAccess::pending(*window));
+        QVERIFY(!window->findChild<QMessageBox *>("runtimeErrorDialog"));
+        dialog->accept();
+        auto open=window->findChild<QPushButton *>("openBrowserCloud");
+        WindowStartupTestAccess::previewState(*window,false);QVERIFY(open->isEnabled());
+        WindowStartupTestAccess::previewState(*window,true);QVERIFY(!open->isEnabled());
+        WindowStartupTestAccess::previewState(*window,false);
+    }
     void legacyWindowCaptureKeepsItsTargetAndFrameLimitInDxgi() {
         try {
         QTemporaryDir data;auto config=Config::defaults();
@@ -93,7 +115,9 @@ class ClassicUiTests final : public QObject {
         QVERIFY(protocol->isHidden());
         QVERIFY(!window->findChild<QComboBox *>("cloudWindowTarget"));
         QVERIFY(!window->findChild<QCheckBox *>("cloudBackground"));
-        QVERIFY(!window->findChild<QPushButton *>("openBrowserCloud"));
+        const auto openBrowser=window->findChild<QPushButton *>("openBrowserCloud");
+        QVERIFY(openBrowser && openBrowser->isVisible());
+        QCOMPARE(openBrowser->text(),QString("打开云游戏浏览器"));
         const auto path = data.filePath("native-device-settings.json");
         QTRY_VERIFY(QFile::exists(path));
         const Config draft{readJson(path)["config"].toObject()};
@@ -103,6 +127,7 @@ class ClassicUiTests final : public QObject {
         capture->setCurrentIndex(capture->findData("DXGI_REMOTE"));
         QVERIFY(protocol->isVisible());
         QVERIFY(!browser->isVisible());
+        QVERIFY(!openBrowser->isVisible());
         QCOMPARE(protocol->currentData().toString(), QString("sendinput"));
     }
 

@@ -1,5 +1,6 @@
 #include "window.hpp"
 #include "windows_compat.hpp"
+#include "browser_cloud.hpp"
 #include <QDesktopServices>
 #ifdef OKWW_NATIVE_ONLY
 #include "runtime/diagnostics.hpp"
@@ -652,9 +653,14 @@ QWidget *Window::devicePage() {
     cloudBrowser_->addItem("Google Chrome", "chrome");
     cloudBrowser_->addItem("Microsoft Edge", "edge");
     cloudBrowser_->setCurrentIndex(std::max(0, cloudBrowser_->findData(deviceDraftConfig_.s("capture.cloud_browser"))));
-    cloudBrowserRow->addRow("云游戏浏览器", cloudBrowser_);
+    auto cloudActions = new QHBoxLayout;
+    cloudActions->addWidget(cloudBrowser_, 1);
+    openCloudBrowser_ = button("打开云游戏浏览器", [this] { openCloudBrowser(); }, this);
+    openCloudBrowser_->setObjectName("openBrowserCloud");
+    cloudActions->addWidget(openCloudBrowser_);
+    cloudBrowserRow->addRow("云游戏浏览器", cloudActions);
     cloudLayout->addLayout(cloudBrowserRow);
-    auto cloudHint = new QLabel("点「开始」会连接已有的专用浏览器，首次使用请按网页提示登录。");
+    auto cloudHint = new QLabel("先打开云游戏浏览器并登录，再点右上角“开始”。开始只连接现有专用窗口；登录状态会保留。");
     cloudHint->setWordWrap(true);
     cloudLayout->addWidget(cloudHint);
     captureForms_->addWidget(cloudPanel);
@@ -1359,6 +1365,31 @@ void Window::connectDevices() {
     pauseExecution();
     prepareConnection(config_);
 }
+void Window::openCloudBrowser() {
+    if(busy_ || pendingStart_ || stoppingDevices_ || automation_) return;
+    saveDeviceSettings();
+    const auto preference=cloudBrowser_->currentData().toString();
+    log("正在打开云游戏浏览器，已有专用窗口会复用…");
+    runAsync([preference] {
+        CloudBrowser browser;
+        browser.prepare(preference,true);
+        return QJsonObject{};
+    },[this,preference](const QJsonObject &) {
+        openedCloudBrowserPreference_=preference;
+        log("请在专用浏览器完成登录，再点击“开始”；当前尚未连接采集，也未启动自动任务。");
+    });
+}
+void Window::showCloudGameHint(const QString &text) {
+    log(text);
+    if(auto existing=findChild<QMessageBox *>("cloudBrowserRequired")) {
+        existing->setText(text);existing->show();return;
+    }
+    auto dialog=new QMessageBox(QMessageBox::Information,"云游戏启动提示",text,QMessageBox::Ok,this);
+    dialog->setObjectName("cloudBrowserRequired");
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->button(QMessageBox::Ok)->setText("知道了");
+    dialog->open();
+}
 void Window::prepareConnection(const Config &config) {
 #ifndef OKWW_NATIVE_ONLY
     restartEngine_ = true;
@@ -1366,7 +1397,7 @@ void Window::prepareConnection(const Config &config) {
     if (engine_.state() != QProcess::NotRunning)
         engine_.write("{\"op\":\"shutdown\"}\n");
 #endif
-    log(config.browserCloud() ? "正在连接专用浏览器，必要时会自动打开云·鸣潮…" : "正在后台连接视频采集与键鼠控制…");
+    log(config.browserCloud() ? "正在连接已打开的云游戏浏览器…" : "正在后台连接视频采集与键鼠控制…");
     runAsync(
         [this, config] {
             QElapsedTimer elapsed;
@@ -1444,6 +1475,7 @@ void Window::updateStartControl() {
                          test->property("boxConnected").toBool());
     if (auto action = findChild<QPushButton *>("refreshDevices"))
         action->setEnabled(!busy_ && !pendingStart_ && !stopping && !devicesRunning_);
+    if(openCloudBrowser_) openCloudBrowser_->setEnabled(!busy_ && !pendingStart_ && !stopping && !automation_);
     start_->setText(stopping ? "正在停止…" : pendingStart_ ? "取消启动"
                              : devicesRunning_ && !executionError_.isEmpty() ? "终止线程"
                              : devicesRunning_ || automation_ ? "停止" : "开始(" + hotkey_ + ")");
@@ -1586,6 +1618,10 @@ void Window::startTask(QString id, bool exitAfter, double limitSeconds) {
         collectSettings();
     } catch (const std::exception &e) {
         failStartup(errorText(e));
+        return;
+    }
+    if(config_.browserCloud() && openedCloudBrowserPreference_!=config_.s("capture.cloud_browser")) {
+        showCloudGameHint("请先点击“打开云游戏浏览器”，登录并进入游戏后再启动。");
         return;
     }
     pendingStart_ = StartRequest{id, exitAfter, limitSeconds, config_};

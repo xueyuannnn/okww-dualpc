@@ -118,6 +118,91 @@ struct Scenes {
 class WorkflowTests : public QObject {
     Q_OBJECT
   private slots:
+    void cameraResetDoesNotMoveCapturedGamePointer() {
+        Scenes s;
+        s.show("world");
+        WorldInteraction(s.c).centerCamera();
+        int down=0,up=0;
+        for(const auto &e:s.events) {
+            QVERIFY(e["op"]!="absolute" && e["op"]!="move");
+            if(e["op"]=="button" && e["name"]=="middle") {
+                if(e["down"].toBool())++down;else ++up;
+            }
+        }
+        QCOMPARE(down,1);QCOMPARE(up,1);QVERIFY(s.input.idle());
+    }
+    void nestEntranceMustBeReachedBeforeCombatOrLoot_data() {
+        QTest::addColumn<QString>("scenario");
+        for(auto name:{"walk-to-entrance","unreachable","direct-team","interaction-stalled"})
+            QTest::newRow(name)<<QString(name);
+    }
+    void nestEntranceMustBeReachedBeforeCombatOrLoot() {
+        QFETCH(QString,scenario);
+        using Op=rust::WorkflowOp;
+        QString page=scenario=="direct-team"?"team":"map";
+        int walks=0,interactions=0,starts=0,rounds=0,searches=0,skips=0,leaves=0;
+        double now=0;
+        rust::workflowRun(rust::WorkflowMethod::NestFight,{},[&](Op op,const double *a,double *out) {
+            switch(op) {
+            case Op::Now:out[0]=now;break;
+            case Op::Checkpoint:case Op::Refresh:case Op::ClickNestTarget:break;
+            case Op::Sleep:case Op::ExecutionWait:now+=a[0];break;
+            case Op::FindNestInterface:out[0]=page=="map" || page=="team";break;
+            case Op::NestInterfaceTeam:out[0]=page=="team";break;
+            case Op::FindNestTravel:case Op::NestTravelExists:out[0]=1;break;
+            case Op::ClickNestTravel:page="world";break;
+            case Op::FindNestConfirm:case Op::NestTravelStillVisible:out[0]=0;break;
+            case Op::NestWaitTeam:out[0]=1;break;
+            case Op::CombatActive:out[0]=page=="fight";break;
+            case Op::NestInteractVisible:out[0]=page=="entrance";break;
+            case Op::NestWalkApproach:
+                ++walks;out[0]=scenario!="unreachable";
+                if(out[0])page="entrance";
+                break;
+            case Op::Key:
+                if(a[0]!=6)fail("聚落进入流程发送了意外按键");
+                ++interactions;
+                if(scenario!="interaction-stalled")page="team";
+                break;
+            case Op::NavStartChallenge:++starts;page="fight";break;
+            case Op::NestCombatRound:
+                if(page!="fight")fail("尚未进入战斗就执行连招");
+                ++rounds;out[0]=1;break;
+            case Op::CaptureOnly:case Op::Captured:out[0]=1;break;
+            case Op::NestWalkInteract:case Op::NestFindEcho:++searches;out[0]=0;break;
+            case Op::MarkNestUnreachable:++skips;break;
+            case Op::HasInfo:out[0]=0;break;
+            case Op::LeaveNest:++leaves;break;
+            default:fail("聚落测试遇到未预期的操作："+QString::number(int(op)));
+            }
+        });
+        const bool reached=scenario=="walk-to-entrance" || scenario=="direct-team";
+        QCOMPARE(rounds,reached?1:0);QCOMPARE(starts,reached?1:0);
+        QCOMPARE(skips,reached?0:1);QCOMPARE(leaves,reached?1:0);
+        QCOMPARE(searches,0);
+        if(scenario=="walk-to-entrance") {QCOMPARE(walks,1);QCOMPARE(interactions,1);}
+        if(scenario=="unreachable") {QCOMPARE(walks,1);QCOMPARE(interactions,0);}
+    }
+    void guideAtTopSelectsVisibleSecondRowWithoutScrolling() {
+        Scenes s;
+        s.frame("book",{"gray_book_boss"});s.frame("map",{"gray_teleport"});
+        for(int i=0;i<3;++i) {
+            const double y=.3+i*.2;
+            s.words["book"].append(s.word(QString("副本%1").arg(i+1),.45,y-.05,.2));
+            s.words["book"].append(s.word("前往",.89,y,.04));
+        }
+        int scrolls=0,selected=-1;
+        s.action=[&](const auto &e) {
+            if(e["op"]=="wheel")++scrolls;
+            if(s.leftUp(e) && s.scene=="book") {
+                selected=pixelRound((double(s.pointer.y())/s.size.height()-.315)/.2);
+                s.scene="map";
+            }
+        };
+        s.show("book");
+        QVERIFY(!Navigation(s.c).selectBookEntry(2,3));
+        QCOMPARE(selected,1);QCOMPARE(scrolls,0);QVERIFY(s.input.idle());
+    }
     void captureCardMustNotTreatGoldenHudAsEnemyLock() {
         for(const QSize size:{QSize(1280,720),QSize(1600,900),QSize(1920,1080),QSize(2560,1440)}) {
             Scenes s(size);s.c.task="AutoCombatTask";

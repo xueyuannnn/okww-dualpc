@@ -1157,7 +1157,7 @@ void Capture::runBrowser() {
             delivered = true;
         } else if (!delivered && nowNs() > startupDeadline) {
             fail("网页云游戏连接超时：" + startupReason +
-                 "。如果专用浏览器窗口还开着，请关闭该窗口后重试；云游戏登录状态会保留。");
+                 "。请先点击“打开云游戏浏览器”并登录；若专用窗口仍无法连接，关闭该专用窗口后再打开，登录状态会保留。");
         }
         if (image.isNull() && !browser_->ready()) std::this_thread::sleep_for(std::chrono::milliseconds(125));
         else std::this_thread::sleep_until(std::chrono::steady_clock::time_point(std::chrono::nanoseconds(started + 33333333LL)));
