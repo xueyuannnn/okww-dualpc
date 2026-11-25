@@ -824,10 +824,15 @@ PythonTeamMacro::WorkshopResult PythonTeamMacro::runWorkshop(int method, std::sp
                           {"stride", image.cols * 3},
                           {"format", "RGB3"},
                           {"sequence", QString::number(sequence ? sequence : frameCopies_)}};
-                if (h_.workshopVisionConfig()["desktop"].toBool()) {
-                    result["desktop_capture"] = true;
-                    result["party_hud"] = QJsonObject{{"visible", h_.inTeam()},
-                        {"current", h_.partyIndex()}, {"size", h_.partyCount()}};
+                {
+                    const auto vision = h_.workshopVisionConfig();
+                    if (vision["desktop"].toBool())
+                        result["desktop_capture"] = true;
+                    if (vision["desktop"].toBool() || vision["capture_card"].toBool() || vision["cloud"].toBool()) {
+                        const bool visible = h_.inTeam();
+                        result["party_hud"] = QJsonObject{{"visible", visible},
+                            {"current", visible ? h_.partyIndex() : -1}, {"size", visible ? h_.partyCount() : 0}};
+                    }
                 }
                 break;
             case rust::WorkflowOp::WorkshopHasLastFrameTime:

@@ -3,7 +3,8 @@
 #include "vision_abi.hpp"
 #include <opencv2/imgproc.hpp>
 namespace okww::runtime {
-TargetRingEvidence targetRingEvidence(const cv::Mat &image, const cv::Mat &reference) {
+namespace {
+TargetRingEvidence targetRingObservation(const cv::Mat &image, const cv::Mat &reference, bool foregroundGold) {
     if(image.empty() || reference.empty() || image.size()!=reference.size() ||
        image.type()!=CV_8UC3 || reference.type()!=CV_8UC3)return {};
     cv::Mat expected, observed, ring, gold, innerRim, outerRim, neutral, control, corners;
@@ -25,10 +26,30 @@ TargetRingEvidence targetRingEvidence(const cv::Mat &image, const cv::Mat &refer
     const int ringPixels=cv::countNonZero(ring), controlPixels=cv::countNonZero(control);
     if(ringPixels<4 || controlPixels<4)return {};
     const int cornerPixels=cv::countNonZero(corners);
-    const double background=std::max(double(cv::countNonZero(gold & control))/controlPixels,
-        cornerPixels>=4 ? double(cv::countNonZero(gold & corners))/cornerPixels : 0.);
-    return {double(cv::countNonZero(gold & ring))/ringPixels,
-            background};
+    const auto evidence=[&](const cv::Mat &mask) -> TargetRingEvidence {
+        const double background=std::max(double(cv::countNonZero(mask & control))/controlPixels,
+            cornerPixels>=4 ? double(cv::countNonZero(mask & corners))/cornerPixels : 0.);
+        return {double(cv::countNonZero(mask & ring))/ringPixels,background};
+    };
+    auto result=evidence(gold);
+    // On a yellow scene, the loose hue mask also paints the empty rim gold.
+    // Compare the more saturated foreground against the same local controls;
+    // keep the original tolerance when the background is not gold-heavy.
+    if(foregroundGold && result.background>=.5) {
+        cv::inRange(observed,cv::Scalar(10,90,55),cv::Scalar(48,255,255),gold);
+        result=evidence(gold);
+    }
+    if(foregroundGold) {
+        // Small rims lose colored pixels after chroma subsampling or scaling.
+        // Expand the observed mask, then compare both rim and background again.
+        cv::dilate(gold,gold,cv::Mat::ones(3,3,CV_8U));
+        result=evidence(gold);
+    }
+    return result;
+}
+}
+TargetRingEvidence targetRingEvidence(const cv::Mat &image, const cv::Mat &reference) {
+    return targetRingObservation(image,reference,false);
 }
 bool systemRunDialogConfirmed(const QVector<TextLine> &lines) {
     return rust::visionRun(
@@ -772,17 +793,9 @@ TargetObservation CombatVision::targetObservation(bool allowShort, bool extended
             }
             case rust::VisionOp::GoldRatio: {
                 const auto b = raw->box;
-                if(context_.streamedCapture) {
-                    const auto evidence=targetRingEvidence(context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference);
-                    out[0]=evidence.distinct() ? evidence.ring : 0;
-                    break;
-                }
-                cv::Mat hsv, gold;
-                cv::cvtColor(context_.frame(cv::Rect(b.x(), b.y(), b.width(), b.height())), hsv,
-                             cv::COLOR_BGR2HSV);
-                cv::inRange(hsv, cv::Scalar(10, 35, 55), cv::Scalar(48, 255, 255), gold);
-                cv::dilate(gold, gold, cv::Mat::ones(3, 3, CV_8U));
-                out[0] = double(cv::countNonZero(gold & ring)) / cv::countNonZero(ring);
+                const auto evidence=targetRingObservation(
+                    context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference,!context_.streamedCapture);
+                out[0]=evidence.distinct() ? evidence.ring : 0;
                 break;
             }
             case rust::VisionOp::NameRaw: {
@@ -791,10 +804,10 @@ TargetObservation CombatVision::targetObservation(bool allowShort, bool extended
             }
             case rust::VisionOp::RawHasTarget: {
                 out[0] = raw->name == has;
-                if(context_.streamedCapture && out[0]!=0) {
+                if(out[0]!=0) {
                     const auto b=raw->box;
-                    out[0]=raw->confidence>=.75 && targetRingEvidence(
-                        context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference).distinct();
+                    out[0]=raw->confidence>=.75 && targetRingObservation(
+                        context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference,!context_.streamedCapture).distinct();
                 }
                 break;
             }
@@ -809,8 +822,8 @@ TargetObservation CombatVision::targetObservation(bool allowShort, bool extended
         targetEvidence_["confidence"]=raw->confidence;
         targetEvidence_["template"]=raw->name;
         targetEvidence_["box"]=QJsonArray{b.x(),b.y(),b.width(),b.height()};
-        if(context_.streamedCapture && !reference.empty()) {
-            const auto e=targetRingEvidence(context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference);
+        if(!reference.empty()) {
+            const auto e=targetRingObservation(context_.frame(cv::Rect(b.x(),b.y(),b.width(),b.height())),reference,!context_.streamedCapture);
             targetEvidence_["gold_ring"]=e.ring;targetEvidence_["gold_background"]=e.background;
             targetEvidence_["gold_contrast"]=e.ring-e.background;
         }
@@ -860,8 +873,13 @@ bool CombatVision::healthBar(bool inCombat) {
                        break;
                    }
                    case rust::VisionOp::NormalHealth: {
-                       out[0] = !colorRectangles(image, {{55, 55, 174}, {76, 85, 225}}, a[0], a[1], a[2])
-                                     .isEmpty();
+                       const auto bars=colorRectangles(image, {{55, 55, 174}, {76, 85, 225}}, a[0], a[1], a[2]);
+                       out[0]=std::any_of(bars.begin(),bars.end(),[&](const auto &bar) {
+                           const auto p=bar.box.center();
+                           return p.y()<image.rows*.9 &&
+                               !(p.x()>image.cols*.87 && p.y()>image.rows*.1) &&
+                               !(p.x()<image.cols*.16 && p.y()<image.rows*.23);
+                       });
                        break;
                    }
                    case rust::VisionOp::BossHealth: {

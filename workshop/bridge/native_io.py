@@ -247,6 +247,13 @@ def install_native_io(channel, direct_input=False):
         class NativeInteraction(dualpc.interaction.KMBoxInteraction):
             native_channel = channel
 
+            def clickable(self):
+                if not self.should_capture():
+                    return False
+                state = channel.request('state')
+                return bool(state.get('armed') and state.get('capture_connected')
+                            and state.get('box', {}).get('connected'))
+
             def _native_input(self, operation, **values):
                 self._require_active()
                 state = channel.request('script_input', operation=operation, **values)

@@ -389,7 +389,6 @@ class GalGameTask(NativeActivity, BaseTask):
                 continue
             self._astrite_remaining[title] = self._count_astrite_in_progress(title, boxes)
             # Available tasks sort first, and one button claims all on that page.
-            self.click(.954, .067, after_sleep=.7)
             return
         raise RuntimeError(f"无法确认{title}的领取状态。")
 
@@ -399,18 +398,22 @@ class GalGameTask(NativeActivity, BaseTask):
             button = self._label(boxes, title, (0, .42, .2, .9))
             if button:
                 self._claim_rewards(title, button)
-                boxes = None
-                for _ in range(3):
-                    boxes = self.wait_until(lambda: (frame if parent(frame := self._read())
-                                                     else None), time_out=2.5)
-                    if boxes:
-                        self.sleep(.35)
-                        settled = self._read()
-                        if parent(settled):
-                            boxes = settled
-                        break
-                    if self._reward_page(title):
-                        self.click(.954, .067, after_sleep=.7)
+                close_attempts = 0
+
+                def return_to_menu():
+                    nonlocal close_attempts
+                    frame = self._read()
+                    if parent(frame):
+                        return frame
+                    if (self._label(frame, "获得", (.45, .19, .55, .36)) or
+                            self._label(frame, "点击空白处继续", (.36, .82, .64, .96))):
+                        self.click(.5, .89, after_sleep=.5)
+                    elif close_attempts < 2 and self._label(frame, title, (0, 0, .2, .13)):
+                        self.click(.954, .067, after_sleep=1.2)
+                        close_attempts += 1
+                    return None
+
+                boxes = self.wait_until(return_to_menu, time_out=12, settle_time=.3)
                 if not boxes:
                     raise RuntimeError("领取奖励后无法返回活动菜单。")
         if self._claim_log:

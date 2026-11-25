@@ -1,5 +1,6 @@
 #ifndef Q_MOC_RUN
 #include "diagnostics_policy_replay.hpp"
+#include "runtime/diagnostics.hpp"
 #endif
 #include <QCryptographicHash>
 #include <QDirIterator>
@@ -103,6 +104,31 @@ class DiagnosticsContracts final : public QObject {
     void persistence() {
         QFETCH(int, scene);
         QCOMPARE(outcome(scene, true), outcome(scene, false));
+    }
+    void reportFolderContainsScreenshotsAndRelatedStepWithoutExternalPaths() {
+        QTemporaryDir profile;
+        const auto root = profile.path();
+        const auto images = root + "/screenshots/errors";
+        put(root + "/logs/native.log", "native end");
+        put(root + "/logs/workshop.log", "workshop end");
+        put(images + "/step.png", "step image");
+        put(images + "/end.png", "error image");
+        put(root + "/private/report.json", "outside the allowed diagnostic directory");
+        const auto step = okww::runtime::saveDiagnostic(root, {{"phase", "task_step"},
+                                                               {"screenshot", images + "/step.png"}});
+        const auto event = okww::runtime::saveDiagnostic(root, {{"phase", "task"},
+            {"screenshot", images + "/end.png"}, {"step_diagnostics",
+                QJsonArray{step["diagnostic_report"], root + "/private/report.json"}}});
+        const QDir folder(event["diagnostic_directory"].toString());
+        const auto report = readJson(folder.filePath("report.json"));
+        QCOMPARE(report["screenshot"].toString(), QString("screenshot.png"));
+        QCOMPARE(report["step_diagnostics"].toArray(), QJsonArray{"steps/01/report.json"});
+        QCOMPARE(report["step_diagnostics_omitted"].toInt(), 1);
+        const auto embedded = readJson(folder.filePath("steps/01/report.json"));
+        QCOMPARE(embedded["screenshot"].toString(), QString("screenshot.png"));
+        QVERIFY(!report.contains("diagnostic_report") && !embedded.contains("diagnostic_directory"));
+        for (const auto &name : {"native.log", "workshop.log", "screenshot.png", "steps/01/screenshot.png"})
+            QVERIFY2(folder.exists(name), name);
     }
 };
 QTEST_GUILESS_MAIN(DiagnosticsContracts)

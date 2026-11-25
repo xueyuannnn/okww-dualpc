@@ -136,6 +136,7 @@ struct Probe {
         case O::SetResultChecked:resultChecked=a[0]!=0;event(op,a[0]);break;
         case O::ResultCheckedAt:out[0]=resultCheckedAt;break;
         case O::SetResultCheckedAt:resultCheckedAt=a[0];event(op,a[0]);break;
+        case O::SetLastHealthSeen:event(op,a[0]);break;
         case O::PythonSkipCombatCheck:case O::BuiltinSkipCombatCheck:case O::HasOnCombatCheck:case O::OnCombatCheck:
         case O::HasEndCondition:case O::EndCondition:case O::MonthlyCard:case O::LoadParty:case O::AutoTargetSetting:
         case O::BossFeatures:case O::LevitatorFeature:case O::EarthFeature:case O::RealmExitFeature:case O::UseLiberationSetting:

@@ -249,10 +249,7 @@ impl Host {
     }
     fn target_enemy(&self) -> SessionResult<bool> {
         let engaged = self.bool(Bool::Engaged)?;
-        if engaged
-            && self.flag(Op::InTeam, &[])?
-            && self.flag(Op::SessionHealthBar, &[])?
-        {
+        if engaged && self.flag(Op::InTeam, &[])? && self.flag(Op::SessionHealthBar, &[])? {
             return Ok(true);
         }
         if self.flag(Op::TargetLocked, &[])? {

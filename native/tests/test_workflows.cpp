@@ -118,6 +118,35 @@ struct Scenes {
 class WorkflowTests : public QObject {
     Q_OBJECT
   private slots:
+    void captureCardMustNotTreatGoldenHudAsEnemyLock() {
+        for(const QSize size:{QSize(1280,720),QSize(1600,900),QSize(1920,1080),QSize(2560,1440)}) {
+            Scenes s(size);s.c.task="AutoCombatTask";
+            const auto box=s.templates.box(size.width()==1600?"has_target_169":"has_target",size);
+            auto patch=readImage(s.root+"/tests/fixtures/remote-target/golden-unlocked.png");
+            cv::resize(patch,patch,{box.width(),box.height()});
+            patch.copyTo(s.frames["world"](cv::Rect(box.x(),box.y(),box.width(),box.height())));
+            s.frame("fight",{size.width()==1600?"has_target_169":"has_target","char_2_text","char_3_text"});
+            for(bool nv12:{false,true}) {
+                if(nv12)for(const auto &name:{QString("world"),QString("fight")}) {
+                    cv::Mat planar;cv::cvtColor(s.frames[name],planar,cv::COLOR_BGR2YUV_I420);
+                    const int pixels=size.width()*size.height();
+                    Frame f;f.width=size.width();f.height=size.height();f.stride=f.width;f.format=PixelFormat::NV12;
+                    f.bytes.resize(pixels*3/2);std::memcpy(f.bytes.data(),planar.data,size_t(pixels));
+                    const auto u=planar.data+pixels,v=u+pixels/4;
+                    for(int i=0;i<pixels/4;++i){f.bytes[pixels+i*2]=char(u[i]);f.bytes[pixels+i*2+1]=char(v[i]);}
+                    s.frames[name]=inferenceImage(f,s.config);
+                }
+                s.events.clear();s.show("world");CombatVision vision(s.c,s.root+"/native/resources/characters.json");
+                QVERIFY2(!vision.hasTarget(false,true),qPrintable(QString::fromUtf8(QJsonDocument(vision.targetEvidence()).toJson())));
+                CombatSession combat(s.c,s.root,s.directory.path());combat.targetEnemyTimeout=.2;
+                QVERIFY(!combat.active());QVERIFY(s.events.isEmpty());
+                s.show("fight");QVERIFY(vision.hasTarget(false,true));QVERIFY(combat.active());
+                s.c.refresh();QVERIFY(combat.active());
+                s.clock.time+=2;s.show("world");QVERIFY(!combat.active());
+                QVERIFY(!s.c.state->inCombat);QVERIFY(s.input.idle());
+            }
+        }
+    }
     void goldenRemoteBackgroundNeverStartsOrSustainsCombat() {
         for(bool local:{false,true})for(const QSize size:{QSize(1280,720),QSize(1920,1080),QSize(2560,1440)}) {
             Scenes s(size);s.c.streamedCapture=true;s.c.task="AutoCombatTask";
@@ -172,8 +201,9 @@ class WorkflowTests : public QObject {
         QVERIFY(s.events.isEmpty());
     }
     void desktopPlayerHudCannotKeepCombatAlive() {
+        for (bool desktop : {false,true})
         for (const QSize size : {QSize(1280,720), QSize(1920,1080), QSize(2560,1440)}) {
-            Scenes s(size); s.c.streamedCapture=true; s.c.task="AutoCombatTask";
+            Scenes s(size); s.c.streamedCapture=desktop; s.c.task="AutoCombatTask";
             s.frame("fight",{"has_target","char_2_text","char_3_text"});
             auto &world=s.frames["world"];
             const auto draw=[&](double x,double y,double w,double h) {
@@ -470,7 +500,7 @@ class WorkflowTests : public QObject {
         const auto hud=s.c.party();
         QVERIFY(hud.visible); QCOMPARE(hud.current,0); QCOMPARE(hud.size,3);
         CombatVision vision(s.c,s.root+"/native/resources/characters.json");
-        QCOMPARE(vision.hasTarget(),locked);
+        QVERIFY2(vision.hasTarget()==locked,qPrintable(QString::fromUtf8(QJsonDocument(vision.targetEvidence()).toJson())));
         s.show("blank");
         QVERIFY(!s.c.party().visible);
         QVERIFY(!vision.hasTarget());
@@ -1888,6 +1918,36 @@ class WorkflowTests : public QObject {
         }
         QVERIFY(s.input.idle());
         QVERIFY(!QFile::exists(s.directory.path() + "/configs-dualpc/DailyStaminaUsage.json"));
+    }
+    void dailyReselectsActivityWhenCaptureCardStartsOnMaterials() {
+        Scenes s;
+        const auto reported = qEnvironmentVariable("OKWW_DAILY_MATERIALS_REPLAY");
+        s.frame("materials", {"gray_book_quest", "gray_book_boss_highlight"});
+        if (!reported.isEmpty()) {
+            const auto image = readImage(reported);
+            QVERIFY(!image.empty());
+            s.frames["materials"] = image;
+        }
+        s.frame("activity", {"gray_book_quest"});
+        s.words["materials"] = {s.word("素材获取", .054, .045, .065)};
+        s.words["activity"] = {s.word("活跃度", .15, .12), s.word("活跃度", .195, .91),
+                                s.word("100", .195, .843, .035)};
+        int questClicks = 0, guideHotkeys = 0;
+        s.action = [&](const auto &event) {
+            if (s.keyUp(event, Input::keyCode("f2"))) ++guideHotkeys;
+            if (!s.leftUp(event) || s.scene != "materials") return;
+            QVERIFY((s.pointer - QPoint(76, 190)).manhattanLength() < 24);
+            if (++questClicks == 2) s.scene = "activity";
+        };
+        s.c.info = [&](const QString &key, const QString &value) {
+            if (key == "每日活跃度" && value == "100") throw Cancelled();
+        };
+        s.show("materials");
+        CombatSession combat(s.c, s.root, s.directory.path());
+        EchoDetector detector(s.root + "/assets/echo_model/echo.onnx");
+        QVERIFY_THROWS_EXCEPTION(Cancelled, Daily(s.c, combat, detector, s.root, s.directory.path()).run(true));
+        QCOMPARE(questClicks, 2);
+        QCOMPARE(guideHotkeys, 0);
     }
     void unrecognizedDailyProgressDoesNotSpendOrStartExtras() {
         Scenes s;

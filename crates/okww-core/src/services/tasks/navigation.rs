@@ -187,8 +187,10 @@ impl Host {
         self.observe(
             || {
                 self.action(Op::ClearTab, &[])?;
-                Ok((local || !self.flag(Op::InTeam, &[])?)
-                    && self.flag(Op::FindBookTab, &[0.6])?)
+                Ok(
+                    (local || !self.flag(Op::InTeam, &[])?)
+                        && self.flag(Op::FindBookTab, &[0.6])?,
+                )
             },
             timeout,
             settle,
@@ -241,9 +243,7 @@ impl Host {
                     && self.flag(Op::FindBookTab, &[0.6])?
                     && self.wait_book_tab(0.8, 0.15, false)?;
                 // A delayed sidebar redraw should not close an already open guide.
-                let guide_open = !recognized
-                    && desktop
-                    && self.flag(Op::BookVisible, &[])?;
+                let guide_open = !recognized && desktop && self.flag(Op::BookVisible, &[])?;
                 if recognized || (guide_open && self.wait_book_tab(3., 0.15, false)?) {
                     self.action(Op::ClickTab, &[1.5])?;
                     if !self.flag(Op::InTeam, &[])? {

@@ -251,7 +251,11 @@ impl Host {
                     if self.scalar(Op::ReadGardenNotInterested, &[0.4])? > 0. {
                         self.action(Op::ClickLastGardenNotInterested, &[1.])?;
                         if remote
-                            && self.wait_for_interval(|| self.flag(Op::FindGardenEventConfirm, &[]), 6., 0.25)?
+                            && self.wait_for_interval(
+                                || self.flag(Op::FindGardenEventConfirm, &[]),
+                                6.,
+                                0.25,
+                            )?
                         {
                             self.action(Op::ClickGardenEventConfirm, &[1.])?;
                         }

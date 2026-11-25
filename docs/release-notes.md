@@ -1,15 +1,13 @@
-# 0.2.0-beta.44
+# 0.2.0-beta.46
 
-[首次安装：下载固定环境包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/environment-win10-11-x64-67a1e8aae098) · [安装与更新说明](https://github.com/xueyuannnn/okww-dualpc/blob/main/docs/usage.md#软件更新)
+[首次安装：下载固定环境包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/environment-win10-11-x64-67a1e8aae098)
 
-- 同步协奏识别、共鸣技能重试、辅助切人和穗波连招修复。
-- 拉海洛方块支持四托盘关卡，并能处理对局中出现的说明页。
-- 新增养成目标刷取。每日任务也可选养成目标补体力进度。
-- 缺少脚本运行库时，诊断记录会列出缺失文件。
+- 修复采集卡将金色非战斗图标识别为锁定目标的问题。
+- 战斗结束判定排除自身 HUD 条带，避免敌人消失后继续普攻。
+- 诊断记录补充采集卡的锁定识别依据。
+- 修复每日任务打开「素材获取」后未切到「活跃度」的问题。
+- 缩短自动战斗在队伍栏消失后的等待，界面恢复后重新确认场上角色。
+- 修复第二索拉领奖返回和拉海洛方块的鼠标控制。
+- 报错时自动把报告、日志、截图和相关步骤放进同一个诊断文件夹，可从弹窗打开。
 
-首次安装将环境包和 `OK-WW-DualPC-update-win10-11-x64.zip` 内的 `OKWW-DualPC-full` 合并到同一目录。已有对应环境的用户可在「关于」直接更新。旧目录缺脚本运行库时，重新解压两个包，再将备份的 `native-full-data` 复制过去。
-
-本版继续使用环境 `win10-11-x64-67a1e8aae098`。`OK-WW-DualPC-source.zip` 是开发源码，校验值见 `SHA256SUMS.txt`。
-
-
-反馈：[lidada0202@gmail.com](mailto:lidada0202@gmail.com)
+已有对应环境的用户覆盖本版累计增量包，更新前备份 `native-full-data`。

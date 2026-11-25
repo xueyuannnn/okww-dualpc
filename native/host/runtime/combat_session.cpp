@@ -231,7 +231,7 @@ void CombatSession::publishParty(const QString &codeState) {
                         {"configured",context_.desktopRecognitionMode},
                         {"compressed_tolerance",context_.streamedImage()},
                         {"environment",context_.recognitionEnvironment}};
-                    if (context_.streamedCapture) report["target_observation"] = vision_.targetEvidence();
+                    report["target_observation"] = vision_.targetEvidence();
                     break;
                 }
                 case rust::SessionOp::AppendPartyBridge: {

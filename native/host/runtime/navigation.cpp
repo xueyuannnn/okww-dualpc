@@ -159,6 +159,20 @@ struct NavigationBridge {
         const bool teamVisible = c.streamedCapture && c.localDesktopGame && c.inTeam();
         guideProbe = {{"frame_width", c.frame.cols}, {"frame_height", c.frame.rows},
                       {"standard_match", bool(match)}, {"team_hud_visible", teamVisible}};
+        // An inactive activity icon can be dimmed by the selected materials
+        // tab. Require the highlighted materials icon before retrying with a
+        // lower threshold, and search only the activity icon's own slot.
+        if (!c.streamedCapture && !c.browserCapture && name == "gray_book_quest") {
+            const auto exact = c.templates.box(name, {c.frame.cols, c.frame.rows});
+            const auto slot = exact.adjusted(-exact.width() / 4, -exact.height() / 4,
+                                              exact.width() / 4, exact.height() / 4) & guideSidebar();
+            if (match && !slot.contains(match->center().toPoint()))
+                match.reset();
+            if (!match && c.find("gray_book_boss_highlight", {.threshold = .83, .grayscale = true})) {
+                match = c.find(name, {.threshold = .65, .search = slot, .grayscale = true});
+                guideProbe.insert("materials_page_activity_match", bool(match));
+            }
+        }
         if ((match && !teamVisible) || (!c.streamedCapture && !c.browserCapture) || !guideTabs.contains(name))
             return match;
 

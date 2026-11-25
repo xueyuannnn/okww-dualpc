@@ -16,12 +16,13 @@ template<class H> bool combatActive(H &h){
         if(h.flag(O::CheckedVersionMatches))return true;
         if(!h.flag(O::InTeam)){
             h.action(O::ReleaseInput);h.action(O::Log,2);
-            if(!h.pair(O::WaitHudRestore,15,.1))h.action(O::Throw,12);h.action(O::Log,3);
+            if(!h.pair(O::WaitHudRestore,h.flag(O::AutoTask)?1.5:15.,.1))h.action(O::Throw,12);h.action(O::Log,3);
         }
         h.action(O::CheckBreak);const bool current=h.flag(O::CurrentExists),python=h.flag(O::PythonMacro);
         if(current&&(python?h.flag(O::PythonSkipCombatCheck):h.flag(O::BuiltinSkipCombatCheck)))return true;
         if(h.flag(O::HasOnCombatCheck)&&!h.flag(O::OnCombatCheck)){h.action(O::ResetCombat);return false;}
         if(h.flag(O::TargetLocked)){h.action(O::SetCheckedVersionFrame);return true;}
+        if(h.flag(O::SessionHealthBar)){h.action(O::SetLastHealthSeen,h.now());h.action(O::SetCheckedVersionFrame);return true;}
         if(h.flag(O::HasEndCondition)&&h.flag(O::EndCondition)){h.action(O::ResetCombat);return false;}
         if(h.flag(O::TargetEnemy)){h.action(O::SetCheckedVersionFrame);return true;}
         if(h.flag(O::MonthlyCard))return true;
@@ -39,14 +40,19 @@ template<class H> bool runAutoCombat(H &h){
     using O=rust::SessionOp;if(!h.flag(O::InTeam))return false;
     const bool earth=h.flag(O::EarthFeature),exit=h.flag(O::RealmExitFeature),world=earth&&!exit,realm=exit&&!earth;
     h.set(Bool::OpenWorld,!realm);h.set(Bool::UseLiberation,h.flag(O::UseLiberationSetting)||!world);
-    bool ran=false,switched=false;
+    bool ran=false,switched=h.get(Bool::Engaged);
     try{
         while(h.flag(O::CombatActive)){
             ran=true;if(!switched){h.action(O::SwitchHealer);switched=true;}
             h.action(O::PerformCurrent);h.action(O::NextFrame);
         }
     }catch(const CharacterDead &){releaseReset(h);throw;}
-    catch(const CombatInterrupted &){releaseReset(h);h.logException(std::current_exception());return ran;}
+    catch(const CombatInterrupted &){
+        if(h.get(Bool::Engaged)&&!h.flag(O::InTeam)){
+            h.action(O::ReleaseInput);h.set(Bool::InLiberation,false);h.action(O::ClearCheckedVersion);
+        }else releaseReset(h);
+        h.logException(std::current_exception());return ran;
+    }
     catch(const CombatEnded &){h.logException(std::current_exception());}
     catch(...){releaseReset(h);throw;}
     h.action(O::ReleaseInput);

@@ -30,7 +30,12 @@ impl Host {
             if !self.flag(Op::InTeam, &[])? {
                 self.action(Op::ReleaseInput, &[])?;
                 self.action(Op::Log, &[2.])?;
-                if !self.flag(Op::WaitHudRestore, &[15., 0.1])? {
+                let timeout = if self.flag(Op::AutoTask, &[])? {
+                    1.5
+                } else {
+                    15.
+                };
+                if !self.flag(Op::WaitHudRestore, &[timeout, 0.1])? {
                     self.fail(12.)?;
                 }
                 self.action(Op::Log, &[3.])?;
@@ -70,8 +75,7 @@ impl Host {
                 self.action(Op::SetCheckedVersionFrame, &[])?;
                 return Ok(true);
             }
-            if (echo_farm || local || self.flag(Op::StreamedImage, &[])?)
-                && self.flag(Op::SessionHealthBar, &[])? {
+            if self.flag(Op::SessionHealthBar, &[])? {
                 self.action(Op::SetLastHealthSeen, &[self.now()?])?;
                 self.action(Op::SetCheckedVersionFrame, &[])?;
                 return Ok(true);
@@ -157,7 +161,7 @@ impl Host {
         Ok(true)
     }
     fn auto_loop(&self, ran: &mut bool) -> SessionResult {
-        let mut switched = false;
+        let mut switched = self.bool(Bool::Engaged)?;
         while self.flag(Op::CombatActive, &[])? {
             *ran = true;
             if !switched {
@@ -219,7 +223,15 @@ impl Host {
             match self.call(Op::ExceptionKind, &[])? as i32 {
                 3 => {
                     self.action(Op::ClearException, &[])?;
-                    self.release_reset()?;
+                    if self.bool(Bool::Engaged)? && !self.flag(Op::InTeam, &[])? {
+                        // Yield to the trigger loop and resume from a fresh
+                        // party observation without running combat-end hooks.
+                        self.action(Op::ReleaseInput, &[])?;
+                        self.set_bool(Bool::InLiberation, false)?;
+                        self.action(Op::ClearCheckedVersion, &[])?;
+                    } else {
+                        self.release_reset()?;
+                    }
                     self.action(Op::LogException, &[])?;
                     return Ok(ran);
                 }

@@ -1506,9 +1506,9 @@ void Window::showExecutionError(const QString &error, QJsonObject event) {
     runtimeErrorDialog_ = dialog;
     dialog->setObjectName("runtimeErrorDialog");
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setInformativeText("自动任务已暂停并释放按键，采集预览保持连接。修正问题后可点“重试任务”，无需先终止线程；关闭提示不会恢复任务。" +
+    dialog->setInformativeText("自动任务已暂停并释放按键，采集预览保持连接。修正问题后可点“重试任务”。" +
         (event.contains("diagnostic_write_error") ? "\n诊断保存失败：" + event["diagnostic_write_error"].toString()
-         : "\n诊断记录：" + QDir::toNativeSeparators(event["diagnostic_report"].toString())));
+         : "\n反馈问题时，请发送整个诊断文件夹。文件夹内可能包含游戏截图和窗口标题。"));
     dialog->setDetailedText(details);
     dialog->button(QMessageBox::Ok)->setText("知道了");
     dialog->setDefaultButton(QMessageBox::Ok);
@@ -1519,7 +1519,7 @@ void Window::showExecutionError(const QString &error, QJsonObject event) {
     connect(copy, &QPushButton::clicked, dialog, [details] { QApplication::clipboard()->setText(details); });
     const auto folder = event["diagnostic_directory"].toString();
     if (!folder.isEmpty()) {
-        auto open = dialog->addButton("打开诊断目录", QMessageBox::ActionRole);
+        auto open = dialog->addButton("打开诊断文件夹", QMessageBox::ActionRole);
         connect(open, &QPushButton::clicked, dialog, [folder] { QDesktopServices::openUrl(QUrl::fromLocalFile(folder)); });
     }
     showNormal();

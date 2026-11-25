@@ -162,7 +162,9 @@ class CombatCheck(BaseWWTask):
                     self._cloud_last_health_seen = time.monotonic()
                 self.last_in_realm_not_combat = 0
                 return self.scene.set_in_combat()
-            if self.is_streamed_image() and self.check_health_bar():
+            capture_card_with_party = (getattr(self, '_native_vision', {}).get('capture_card', False)
+                                       and self.in_team()[0])
+            if (self.is_streamed_image() or capture_card_with_party) and self.check_health_bar():
                 self._cloud_last_health_seen = time.monotonic()
                 return self.scene.set_in_combat()
             if self.is_cloud_game() and self._cloud_last_health_seen is not None:
@@ -342,7 +344,13 @@ class CombatCheck(BaseWWTask):
         if not wait:
             self.middle_click()
         else:
-            if self.has_target() or (self.is_cloud_game() and self.check_health_bar()):
+            def target_visible():
+                return self.has_target() or (
+                    (self.is_cloud_game() or (getattr(self, '_native_vision', {}).get('capture_card', False)
+                                              and self._in_combat and self.in_team()[0]))
+                    and self.check_health_bar())
+
+            if target_visible():
                 return True
             else:
                 logger.info(f'target lost try retarget {self.target_enemy_time_out}')
@@ -350,7 +358,7 @@ class CombatCheck(BaseWWTask):
                 while time.time() - start < self.target_enemy_time_out:
                     interval = max(.2, min(2, getattr(self, '_native_vision', {}).get('retarget_interval', .8))) if self.is_cloud_game() else .2
                     self.middle_click(interval=interval)
-                    if self.has_target() or (self.is_cloud_game() and self.check_health_bar()):
+                    if target_visible():
                         return True
                     self.next_frame()
 

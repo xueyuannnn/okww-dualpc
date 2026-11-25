@@ -40,6 +40,13 @@ bool dailyActivityLabel(QVector<TextLine> lines) {
     }
     return false;
 }
+bool dailyMaterialPage(TaskContext &context) {
+    const auto lines = context.text(.015, .028, .20, .095, .65);
+    return std::any_of(lines.begin(), lines.end(), [](const auto &line) {
+        const auto text = dailyText(line.text);
+        return text == "素材获取" || text == "素材獲取" || text == "materialacquisition";
+    });
+}
 int dailyRewardAnchors(const QVector<TextLine> &lines, const cv::Mat &frame) {
     QSet<int> found;
     for (const auto &line : lines) {
@@ -507,7 +514,18 @@ DailyProgress Daily::rustActions(int method, std::initializer_list<double> args)
             break;
         }
         case rust::WorkflowOp::DailyOpenQuestBook: {
-            navigation_.openBook("gray_book_quest");
+            const auto tab = navigation_.openBook("gray_book_quest");
+            if (dailyMaterialPage(c_)) {
+                // F2 can remember the materials page. Verify the sidebar
+                // click before touching any controls in its content area.
+                c_.click(tab, .45);
+                if (!c_.wait([&] { return !dailyMaterialPage(c_); }, 3., .25)) {
+                    dailyObservation_ = {{"page_confirmed", false}, {"page", "materials"},
+                                         {"guide_tab_center", QJsonArray{tab.center().x(), tab.center().y()}},
+                                         {"guide_tab_confidence", tab.confidence}, {"navigation_attempts", 2}};
+                    observationFailure("已打开索拉指南，但仍停在「素材获取」。请确认鼠标能点中左侧「活跃度」图标。");
+                }
+            }
             break;
         }
         case rust::WorkflowOp::ReadDailyPage: {
