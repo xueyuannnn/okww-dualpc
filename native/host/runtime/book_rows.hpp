@@ -9,5 +9,6 @@ struct BookRow {
 QVector<BookRow> readBookRows(TaskContext &context);
 double bookRowVisualSimilarity(const BookRow &left, const BookRow &right);
 double bookRowSimilarity(const BookRow &left, const BookRow &right, bool stationary = false);
-bool bookListAtTop(TaskContext &context, int total);
+// Negative means the scrollbar isn't visible in this frame.
+int bookListBoundary(TaskContext &context, bool bottom = false);
 } // namespace okww::runtime

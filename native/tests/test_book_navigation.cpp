@@ -13,6 +13,112 @@ struct BookClock final : Clock {
 class BookNavigationTests final : public QObject {
     Q_OBJECT
   private slots:
+    void uuWeeklyGuideAndChallengeTransition() {
+        const auto folder = qEnvironmentVariable("OKWW_UU_REPLAY");
+        if (folder.isEmpty()) QSKIP("Set OKWW_UU_REPLAY to the captured UU test frames");
+        const auto guide = readImage(folder + "/weekly-live.png");
+        const auto challenge = readImage(folder + "/weekly-difficulty.png");
+        const auto map = readImage(folder + "/weekly-map.png");
+        QVERIFY(!guide.empty() && !challenge.empty() && !map.empty());
+        const QString root = OKWW_SOURCE_ROOT;
+        Ocr ocr(root + "/assets/ocr/ppocrv6-small");
+        Templates templates(root + "/assets/coco_annotations.json");
+        QTemporaryDir data;
+        Profile profile(data.path(), root + "/native/resources/catalog.json");
+        BookClock clock;
+        ExecutionGate gate;
+        Execution execution(gate, gate.start(), clock);
+        const QSize size(guide.cols, guide.rows);
+        auto config = Config::defaults();
+        config.set("capture.output_width", size.width());
+        config.set("capture.output_height", size.height());
+        config.set("kmbox.desktop_width", size.width());
+        config.set("kmbox.desktop_height", size.height());
+        QPoint mouse, selected;
+        double clickedAt = 0.;
+        Input input(config, size, true, [&](const QJsonObject &packet) {
+            if (packet["op"] == "absolute") mouse = {packet["x"].toInt(), packet["y"].toInt()};
+            if (packet["op"] == "button" && !packet["down"].toBool()) {
+                selected = mouse;
+                clickedAt = clock.now();
+            }
+            return QJsonObject{};
+        }, execution);
+        TaskContext context(execution, input, templates, profile, [&] {
+            if (selected.isNull()) return guide;
+            return clock.now() - clickedAt < 2. ? map : challenge;
+        }, [&](const auto &frame, QRect area, double threshold) { return ocr.read(frame, area, threshold); });
+        context.task = "FarmEchoTask2";
+        context.streamedCapture = true;
+        context.refresh();
+        const auto rows = readBookRows(context);
+        for (const auto &row : rows) qInfo() << row.title << row.button.box;
+        QVERIFY(rows.size() >= 3);
+        QVERIFY(rows[0].title.contains("定序"));
+        QVERIFY(rows[1].title.contains("失坠"));
+        Navigation navigation(context);
+        try {
+            QVERIFY(navigation.selectBookEntry(2, 9));
+        } catch (const std::exception &error) {
+            QFAIL(error.what());
+        }
+        QVERIFY(std::abs(selected.y() / double(size.height()) - .526) < .015);
+        QVERIFY(clock.now() - clickedAt >= 2.);
+    }
+    void reportedWeeklyGuideKeepsOnlyChallengeButtons() {
+        const auto folder = qEnvironmentVariable("OKWW_WEEKLY_GUIDE_REPLAY");
+        if (folder.isEmpty()) QSKIP("Set OKWW_WEEKLY_GUIDE_REPLAY to the saved guide diagnostics");
+        const auto original = readImage(folder + "/steps/03/screenshot.png");
+        const auto scrolled = readImage(folder + "/steps/01/screenshot.png");
+        QVERIFY(!original.empty() && !scrolled.empty());
+        const QString root = OKWW_SOURCE_ROOT;
+        Ocr ocr(root + "/assets/ocr/ppocrv6-small");
+        for (int mode = 0; mode < 4; ++mode) {
+            const QSize size = mode == 0 ? QSize(1280, 720) : QSize(original.cols, original.rows);
+            QTemporaryDir data;
+            Templates templates(root + "/assets/coco_annotations.json");
+            Profile profile(data.path(), root + "/native/resources/catalog.json");
+            BookClock clock;
+            ExecutionGate gate;
+            Execution execution(gate, gate.start(), clock);
+            auto config = Config::defaults();
+            config.set("capture.output_width", size.width()); config.set("capture.output_height", size.height());
+            config.set("kmbox.desktop_width", size.width()); config.set("kmbox.desktop_height", size.height());
+            QPoint mouse, selected;
+            Input input(config, size, true, [&](const QJsonObject &packet) {
+                if (packet["op"] == "absolute") mouse = {packet["x"].toInt(), packet["y"].toInt()};
+                if (packet["op"] == "button" && !packet["down"].toBool()) selected = mouse;
+                return QJsonObject{};
+            }, execution);
+            cv::Mat page, next(size.height(), size.width(), CV_8UC3, cv::Scalar(36, 46, 59));
+            const auto teamIcon = templates.pattern("team_start_challenge", size);
+            const auto teamBox = templates.box("team_start_challenge", size);
+            teamIcon.copyTo(next(cv::Rect(teamBox.x(), teamBox.y(), teamIcon.cols, teamIcon.rows)));
+            cv::resize(scrolled, page, {size.width(), size.height()});
+            TaskContext context(execution, input, templates, profile, [&] {
+                return selected.isNull() ? page : next;
+            }, [&](const auto &frame, QRect area, double threshold) { return ocr.read(frame, area, threshold); });
+            context.streamedCapture = mode < 2;
+            context.localDesktopGame = mode == 1;
+            context.browserCapture = mode == 3;
+            context.refresh();
+            auto rows = readBookRows(context);
+            QCOMPARE(rows.size(), 4);
+            QVERIFY(rows[1].title.contains("失坠"));
+            QVERIFY(rows[2].title.contains("虚妄"));
+            QCOMPARE(bookListBoundary(context), 0);
+            cv::resize(original, page, {size.width(), size.height()});
+            context.refresh();
+            rows = readBookRows(context);
+            QCOMPARE(rows.size(), 4);
+            QVERIFY(rows[0].title.contains("定序"));
+            QVERIFY(rows[1].title.contains("失坠"));
+            QCOMPARE(bookListBoundary(context), 1);
+            Navigation nav(context);
+            QVERIFY(nav.selectBookEntry(2, 9));
+            QVERIFY(std::abs(selected.y() / double(size.height()) - .526) < .015);
+        }
+    }
     void observedGuideScreenshot() {
         const auto path=qEnvironmentVariable("OKWW_BOOK_REPLAY");
         if(path.isEmpty())QSKIP("Set OKWW_BOOK_REPLAY to an observed guide screenshot");
@@ -43,7 +149,7 @@ class BookNavigationTests final : public QObject {
             TaskContext context(execution,input,templates,profile,[&]{
                 if(selected.isNull())return frame;
                 cv::Mat next(size.height(),size.width(),CV_8UC3,cv::Scalar(35,43,52));
-                auto icon=templates.pattern("team_close",size);auto box=templates.box("team_close",size);
+                auto icon=templates.pattern("team_start_challenge",size);auto box=templates.box("team_start_challenge",size);
                 icon.copyTo(next(cv::Rect(box.x(),box.y(),icon.cols,icon.rows)));return next;
             },[&](const auto &image,QRect region,double threshold){return ocr.read(image,region,threshold);});
             context.streamedCapture=true;context.refresh();
@@ -76,6 +182,7 @@ class BookNavigationTests final : public QObject {
         for(int n:{1,2,3})QTest::newRow(qPrintable(QString("tail-%1").arg(n)))<<720<<n<<true<<true<<0;
         for(int noise:{1,2,3,4})for(int n:{1,9,21})
             QTest::newRow(qPrintable(QString("remote-ocr-%1-%2").arg(noise).arg(n)))<<1080<<n<<true<<false<<noise;
+        QTest::newRow("remote-small-wheel-sixth") << 720 << 6 << true << false << 5;
     }
     void destination() {
         QJsonObject failure;
@@ -101,8 +208,8 @@ class BookNavigationTests final : public QObject {
                 if(mouse.x() < size.width()*.46 || mouse.x() > size.width()*.61)
                     return QJsonObject{};
                 const int steps=q["steps"].toInt();
-                if(steps>0){++upward;offset=0.;scrolledAt=clock.time;}
-                else offset=std::min(height*2.362,offset-steps*height*.045);
+                if(steps>50){++upward;offset=0.;scrolledAt=clock.time;}
+                else offset=std::clamp(offset-steps*height*(ocrNoise==5?.006:.045),0.,height*2.362);
             }
             if(q["op"]=="button" && !q["down"].toBool() && mouse.x()>size.width()*.84)
                 for(int i=0;i<21;++i)if(std::abs(mouse.y()-rowY(i))<height*.025)selected=i+1;
@@ -115,15 +222,17 @@ class BookNavigationTests final : public QObject {
                 pattern.copyTo(frame(cv::Rect(pos.x(),pos.y(),pattern.cols,pattern.rows)));
             };
             if(selected) {
-                paint("team_close",templates.box("team_close",size).topLeft());return frame;
+                paint("team_start_challenge",templates.box("team_start_challenge",size).topLeft());return frame;
             }
             paint("gray_book_boss",templates.box("gray_book_boss",size).topLeft());
-            cv::rectangle(frame,cv::Rect(qRound(size.width()*.972),qRound(height*(offset==0?.195:.4)),
+            cv::rectangle(frame,cv::Rect(qRound(size.width()*.972),qRound(height*(offset==0?.195:offset>=height*2.361?.817:.4)),
                 std::max(2,qRound(size.width()*.004)),qRound(height*.06)),cv::Scalar(240,240,240),-1);
             const auto button=templates.pattern("boss_proceed",size);
             for(int i=0;i<21;++i) {
                 const int y=qRound(rowY(i));
                 if(y<height*.215 || y>height*.865)continue;
+                cv::rectangle(frame, {qRound(size.width() * .823), y - qRound(height * .035),
+                    qRound(size.width() * .021), qRound(height * .070)}, cv::Scalar(215, 215, 215), -1);
                 cv::putText(frame,"Boss "+std::to_string(i+1),{qRound(size.width()*.47),y-qRound(height*.045)},
                     cv::FONT_HERSHEY_SIMPLEX,height/1100.,cv::Scalar(230,230,230),std::max(1,height/650));
                 cv::RNG random(i+153);

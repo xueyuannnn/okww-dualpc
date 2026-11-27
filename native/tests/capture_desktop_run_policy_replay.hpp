@@ -11,6 +11,7 @@ struct State {
     std::array<uint8_t, 256> bytes{};
     std::atomic<bool> *stop = nullptr;
     QSize resizeTo;
+    bool missingFirstFrame = false;
     explicit State(int s) : scene(s) {}
 };
 inline thread_local State *active = nullptr;
@@ -87,6 +88,7 @@ struct Duplication {
         if (active->scene % 37 == 0)
             throw std::runtime_error("frame fixture");
         changed = active->scene % 3 != 0;
+        if (active->missingFirstFrame && index == 1) return {};
         if (active->scene % 5 == 0 && index < 3)
             return {};
         QImage image(active->resizeTo.isValid() ? rect.size() : QSize(8, 4), QImage::Format_RGB32);
@@ -347,6 +349,12 @@ struct CaptureDesktopRunSdk {
         case rust::WorkflowOp::DesktopRunImageNull:
             out[0] = image.isNull();
             break;
+        case rust::WorkflowOp::DesktopRunFirstFrameTimedOut:
+            out[0] = active->missingFirstFrame;
+            break;
+        case rust::WorkflowOp::DesktopRunReportFirstFrameRetry:
+            c.desktopRecovery("DXGI 未收到画面，正在重新建立桌面复制");
+            break;
         case rust::WorkflowOp::DesktopRunImageChanged:
             out[0] = changed;
             break;
@@ -475,6 +483,14 @@ inline QJsonObject resizeOutcome(bool dxgi) {
     state.resizeTo = QSize(1600, 900);
     active = &state;
     auto result = run<current::Capture>(dxgi);
+    result["trace"] = state.trace;
+    return result;
+}
+inline QJsonObject firstFrameRecoveryOutcome() {
+    State state(13);
+    state.missingFirstFrame = true;
+    active = &state;
+    auto result = run<current::Capture>(true);
     result["trace"] = state.trace;
     return result;
 }

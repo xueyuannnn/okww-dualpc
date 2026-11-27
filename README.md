@@ -4,14 +4,14 @@
 
 双机模式通过采集卡读取画面、KMBox Net 发送键鼠操作；也可使用本机 DXGI 截图搭配 SendInput，也支持网页云·鸣潮。业务内核使用 Rust，负责内置任务、角色连招、识别策略和设备控制；C++ 保留 Qt 界面及底层 SDK 适配，工坊、通用脚本和活动流程使用独立 Python 环境。
 
-基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.48**，支持 Windows 10／11 x64。
+基于 [OK-WW](https://github.com/ok-oldking/ok-wuthering-waves)、[OK-WW Enhanced](https://github.com/zzc-tongji/ok-ww-enhanced) 和 [ok-script](https://github.com/ok-oldking/ok-script) 开发。当前版本为 **0.2.0-beta.56**，支持 Windows 10／11 x64。
 
 ## 下载与安装
 
 | 下载 | 用途 |
 | --- | --- |
 | **[① 固定环境包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/environment-win10-11-x64-67a1e8aae098)** · 约 625 MB | 首次安装下载一次，包含运行库、Python 和识别模型 |
-| **[② beta.48 累计增量包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/v0.2.0-beta.48)** · 约 21 MB | 程序、脚本和界面资源；每个版本只需安装这一份 |
+| **[② beta.56 累计增量包](https://github.com/xueyuannnn/okww-dualpc/releases/tag/v0.2.0-beta.56)** · 约 21 MB | 程序、脚本和界面资源；每个版本只需安装这一份 |
 | [其他版本](https://github.com/xueyuannnn/okww-dualpc/releases) · [使用说明](docs/usage.md) · [问题反馈](https://github.com/xueyuannnn/okww-dualpc/issues) | 源码和校验文件在对应版本的 Assets 中 |
 
 **首次安装**：下载①和②，将两个 ZIP 内的 `OKWW-DualPC-full` 文件夹合并解压到同一个位置，运行其中的 `OKWW-DualPC-Native-Dev.exe`，无需另装 Python。
@@ -24,9 +24,7 @@
 
 ## 主要功能
 
-网页云游戏：先在双机设置点击「打开云游戏浏览器」，登录并进入游戏后再点「开始」。登录状态保留，启动任务时复用专用窗口。
-
-- **采集与输入**：采集卡、DXGI 单机模式、DXGI 远程模式和网页云游戏四种采集方式，KMBox Net、SendInput 两种输入方式。选中后展开对应设置，支持设备参数检测和鼠标移动测试。参数自动保存，连接时应用。
+- **采集与输入**：采集卡、DXGI 单机模式、DXGI 远程模式及网页云游戏，KMBox Net、SendInput 两种输入方式。选中后展开对应设置，支持设备参数检测和鼠标移动测试。参数自动保存，连接时应用。
 - **自动战斗**：识别当前队伍，支持 58 名内置角色，按队伍选择内置连招或 Python 工坊连招。运行栏显示队伍、当前角色和代码模式。
 - **每日任务**：优先完成每日目标并领取奖励，再清理剩余体力、聚落和周常；缺少声骸时可先刷残像聚落。支持体力补充、任务重试与中断恢复。
 - **副本循环**：4C 声骸、无音区、凝素领域、模拟领域和高级技能材料。4C 可设置副本顺序、起始分类与位置、每个副本的轮数。

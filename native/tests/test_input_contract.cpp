@@ -159,6 +159,31 @@ template <class T> QJsonObject replay(int operation, int scene) {
 class InputContracts final : public QObject {
     Q_OBJECT
   private slots:
+    void lostReplyDuringCornerMoveDoesNotClickOrReplay() {
+        auto config = Config::defaults();
+        TestClock clock;
+        ExecutionGate gate;
+        Execution execution(gate, gate.start(), clock);
+        QList<QJsonObject> commands;
+        int moves = 0;
+        Input input(config, {1920, 1080}, false, [&](const QJsonObject &cmd) {
+            commands.append(cmd);
+            if (cmd["op"] == "move" && ++moves == 2)
+                fail("reply missing");
+            return QJsonObject{};
+        }, execution);
+        QVERIFY_THROWS_EXCEPTION(std::runtime_error, input.click(QPointF(400, 300)));
+        QCOMPARE(moves, 2);
+        for (const auto &cmd : std::as_const(commands)) {
+            if (cmd["op"] == "move") {
+                QVERIFY(cmd["x"].toInt() < 0);
+                QVERIFY(std::abs(cmd["x"].toInt()) <= config.n("kmbox.move_chunk"));
+            } else {
+                QCOMPARE(cmd["op"].toString(), QString("release"));
+            }
+        }
+        QVERIFY(input.idle());
+    }
     void sequences_data() {
         QTest::addColumn<int>("operation");
         QTest::addColumn<int>("scene");

@@ -5,6 +5,10 @@ bool combatIntroVisible(TaskContext &c) {
     return matchingText(c.text(.38, .16, .85, .25),
         "^\\s*(战斗特色|戰鬥特色|Combat\\s+(Features|Characteristics|Style))\\s*$").has_value();
 }
+bool domainRewardObjective(TaskContext &c) {
+    return matchingText(c.text(.02, .19, .29, .47, .7),
+        "(?i)^\\s*(?:领\\s*取\\s*奖\\s*励|領\\s*取\\s*獎\\s*勵|Claim\\s+Rewards?)\\s*$").has_value();
+}
 namespace {
 QString clean(QString text) { return text.remove(QRegularExpression("\\s+")); }
 bool matches(const QString &pattern, const QString &text) {
@@ -221,8 +225,12 @@ RestartAction RestartTracker::step(RestartKind kind, bool hud, bool realm) {
 void restartBossDomain(TaskContext &c, const std::function<bool()> &hasEnemyHealth) {
     Navigation navigation(c);
     RestartDialog dialog;
-    std::optional<uint64_t> requestedFrame;
-    rust::workflowRun(rust::WorkflowMethod::RestartBoss, {},
+    QVector<TextLine> dialogLines;
+    QJsonObject observation;
+    QJsonArray sent;
+    const double began = c.execution.now();
+    const std::array args{double(bool(hasEnemyHealth))};
+    rust::workflowRun(rust::WorkflowMethod::RestartBoss, args,
                       [&](rust::WorkflowOp op, const double *a, double *out) {
                           switch (op) {
                           case rust::WorkflowOp::Refresh: {
@@ -230,7 +238,22 @@ void restartBossDomain(TaskContext &c, const std::function<bool()> &hasEnemyHeal
                               break;
                           }
                           case rust::WorkflowOp::ReadRestartDialog: {
-                              dialog = restartDialog(c.text(.16, .2, .86, .82, .7));
+                              dialogLines = c.text(.16, .2, .86, .82, .7);
+                              dialog = restartDialog(dialogLines);
+                              if (dialog.kind == RestartKind::None && hasEnemyHealth && !c.inTeam()) {
+                                  // Keep the original OCR context. Only add button detections
+                                  // from the modal and settlement controls.
+                                  const auto buttons = gameBox(c.frame, .17, .55, .86, .91);
+                                  const auto scaled = c.streamedImage() ? c.textScaled(buttons, .65, 2.)
+                                                                       : c.text(buttons, .7);
+                                  auto retried = dialogLines;
+                                  retried += scaled;
+                                  dialog = restartDialog(retried);
+                                  dialogLines = std::move(retried);
+                              }
+                              if (hasEnemyHealth)
+                                  observation = {{"frame", QString::number(c.frameVersion)},
+                                                 {"dialog_kind", int(dialog.kind)}};
                               out[0] = int(dialog.kind);
                               break;
                           }
@@ -242,15 +265,64 @@ void restartBossDomain(TaskContext &c, const std::function<bool()> &hasEnemyHeal
                               break;
                           case rust::WorkflowOp::InTeam: {
                               out[0] = c.inTeam();
+                              if (hasEnemyHealth)
+                                  observation["party_visible"] = bool(out[0]);
                               break;
                           }
                           case rust::WorkflowOp::NavInRealm: {
                               out[0] = navigation.inRealm();
+                              if (hasEnemyHealth)
+                                  observation["realm"] = bool(out[0]);
+                              break;
+                          }
+                          case rust::WorkflowOp::Now: {
+                              out[0] = c.execution.now();
+                              break;
+                          }
+                          case rust::WorkflowOp::RestartFrame: {
+                              out[0] = double(c.frameVersion);
+                              break;
+                          }
+                          case rust::WorkflowOp::RestartPendingModal: {
+                              const auto controls = c.frame.empty() ? QRect{} : gameBox(c.frame, .23, .39, .79, .80);
+                              static const QRegularExpression modalButton(
+                                  "^(?:确认|確認|确定|確定|取消|返回|confirm|cancel)$",
+                                  QRegularExpression::CaseInsensitiveOption);
+                              out[0] = std::any_of(dialogLines.cbegin(), dialogLines.cend(), [&](const auto &line) {
+                                  return controls.contains(line.center().toPoint()) &&
+                                         modalButton.match(clean(line.text)).hasMatch();
+                              });
+                              observation["pending_modal"] = bool(out[0]);
+                              break;
+                          }
+                          case rust::WorkflowOp::RestartWorldMarker: {
+                              out[0] = bool(c.find("world_earth_icon", {.threshold = .55, .filter = Filter::White}));
+                              observation["world_marker"] = bool(out[0]);
+                              break;
+                          }
+                          case rust::WorkflowOp::RestartRewardObjective: {
+                              out[0] = domainRewardObjective(c);
+                              if (out[0])
+                                  observation["previous_reward_seen"] = true;
+                              break;
+                          }
+                          case rust::WorkflowOp::RestartTimer: {
+                              out[0] = -1.;
+                              static const QRegularExpression timer("^(\\d{1,2})[:：]([0-5]\\d)(?:[:：.]([0-9]{2}))?$");
+                              for (const auto &line : c.text(.435, .106, .565, .177, .78)) {
+                                  const auto match = timer.match(clean(line.text));
+                                  if (match.hasMatch()) {
+                                      out[0] = match.captured(1).toInt() * 60 + match.captured(2).toInt() +
+                                               match.captured(3).toInt() / 100.;
+                                      break;
+                                  }
+                              }
+                              observation["timer_seconds"] = out[0];
                               break;
                           }
                           case rust::WorkflowOp::EchoHasHealthBar: {
-                              out[0] = hasEnemyHealth && requestedFrame && c.frameVersion != *requestedFrame &&
-                                       hasEnemyHealth();
+                              out[0] = hasEnemyHealth();
+                              observation["enemy_health_visible"] = bool(out[0]);
                               break;
                           }
                           case rust::WorkflowOp::HasInfo: {
@@ -258,7 +330,8 @@ void restartBossDomain(TaskContext &c, const std::function<bool()> &hasEnemyHeal
                               break;
                           }
                           case rust::WorkflowOp::RestartCompleteInfo: {
-                              c.info("再次挑战", "下一轮副本已确认加载完成");
+                              const QStringList evidence{"", " · 新出现的敌人血条", " · 挑战计时重置"};
+                              c.info("再次挑战", "下一轮副本已确认加载完成" + evidence.at(int(a[0])));
                               break;
                           }
                           case rust::WorkflowOp::RestartButtonExists: {
@@ -266,11 +339,12 @@ void restartBossDomain(TaskContext &c, const std::function<bool()> &hasEnemyHeal
                               break;
                           }
                           case rust::WorkflowOp::ClickRestartButton: {
-                              if (dialog.kind == RestartKind::Resource)
-                                  requestedFrame.reset();
-                              else
-                                  requestedFrame = c.frameVersion;
                               c.click(*dialog.button, a[0]);
+                              if (hasEnemyHealth)
+                                  sent.append(QJsonObject{{"kind", int(dialog.kind)},
+                                                          {"button", dialog.button->text},
+                                                          {"frame", QString::number(c.frameVersion)},
+                                                          {"elapsed_seconds", c.execution.now() - began}});
                               break;
                           }
                           case rust::WorkflowOp::Key: {
@@ -282,6 +356,23 @@ void restartBossDomain(TaskContext &c, const std::function<bool()> &hasEnemyHeal
                               break;
                           }
                           case rust::WorkflowOp::Throw: {
+                              if (hasEnemyHealth && c.diagnostic) {
+                                  QJsonArray lines;
+                                  for (const auto &line : dialogLines.mid(0, 16))
+                                      lines.append(line.json());
+                                  c.diagnostic("再次挑战未确认",
+                                               {{"last_observation", observation},
+                                                {"dialog_ocr", lines},
+                                                {"clicks", sent},
+                                                {"request_sent", a[1] != 0.},
+                                                {"loading_seen", a[2] != 0.},
+                                                {"timer_before_restart", a[3]},
+                                                {"elapsed_seconds", c.execution.now() - began}});
+                              }
+                              if (hasEnemyHealth)
+                                  throw RestartNavigationFailure(a[1] != 0.
+                                      ? "再次挑战未完成：已点击重开，尚未确认下一轮副本加载"
+                                      : "再次挑战未完成：未找到可确认的重开按钮");
                               throw NavigationFailure("再次挑战未完成：尚未确认下一轮副本加载");
                               break;
                           }

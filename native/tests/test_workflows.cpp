@@ -567,6 +567,39 @@ class WorkflowTests : public QObject {
         QTest::newRow("empty-720p")<<45<<720<<false;
         QTest::newRow("empty-540p")<<35<<540<<false;
     }
+    void remoteSwitchWaitsForTwoFreshFramesWithoutClicking() {
+        using O = rust::SessionOp;
+        double now = 1.;
+        int frame = 0, taps = 0, attacks = 0, committedAt = -1;
+        const std::array args{1., 0.};
+        rust::sessionRun(rust::SessionMethod::SwitchNext, args,
+            [&](O op, const double *a, double *out, const std::exception_ptr &) {
+                switch (op) {
+                case O::DesktopCapture: case O::StreamedImage: out[0] = 1.; break;
+                case O::Now: out[0] = now; break;
+                case O::PartySize: out[0] = 3.; break;
+                case O::ChooseDecision: case O::TargetIndex: out[0] = 1.; break;
+                case O::SwitchFrameSequence: out[0] = frame >= 5 ? 4 : frame; break;
+                case O::ReadHud:
+                    out[0] = 1.; out[1] = 3.;
+                    out[2] = frame <= 1 ? 0 : frame == 2 || frame == 4 ? 1 : frame == 3 ? -1 : 1;
+                    break;
+                case O::TapTargetIndex: ++taps; QCOMPARE(a[0], .05); break;
+                case O::ClickDefault: ++attacks; break;
+                case O::NextFrame: ++frame; now += .034; break;
+                case O::Sleep: now += a[0]; break;
+                case O::SetTargetCurrent: committedAt = frame; break;
+                case O::Throw: fail("remote switch did not settle");
+                default: break;
+                }
+                // Keep the first two copies of the final target observation at
+                // the same sequence, then release one distinctly new frame.
+                if (op == O::SwitchFrameSequence && frame >= 7) out[0] = 5.;
+            });
+        QCOMPARE(committedAt, 7);
+        QCOMPARE(taps, 1);
+        QCOMPARE(attacks, 0);
+    }
     void remoteCompressionKeepsPartyAndTargetRecognition() {
         QFETCH(int,quality); QFETCH(int,height);
         QFETCH(bool,locked);
@@ -1543,6 +1576,96 @@ class WorkflowTests : public QObject {
             QVERIFY(s.clock.time - requested < 1.75);
         else
             QVERIFY(s.clock.time - requested >= 1.75);
+        QVERIFY(s.input.idle());
+    }
+    void remoteRestartChecksForNewRound_data() {
+        QTest::addColumn<QString>("scenario");
+        for (const auto *name : {"new-health", "scaled-button", "timer-reset", "old-health", "timer-kept-running",
+                                 "unrecognized-confirm", "overworld", "duplicate-frame", "previous-reward"})
+            QTest::newRow(name) << QString(name);
+    }
+    void remoteRestartChecksForNewRound() {
+        QFETCH(QString, scenario);
+        Scenes s;
+        s.c.streamedCapture = true;
+        s.c.desktopRecognitionMode = "remote";
+        s.c.localDesktopGame = false;
+        s.c.task = "FarmEchoTask";
+        s.frame("restart", {});
+        s.frame("arena-without-exit-icon", {"char_2_text"});
+        s.frame("previous-reward", {"char_2_text", "illusive_realm_exit"});
+        s.words["previous-reward"] = {s.word("领取奖励", .032, .254)};
+        if (scenario == "scaled-button") {
+            s.scaledText = [&](const cv::Mat &, QRect) -> QVector<TextLine> {
+                if (s.scene == "restart")
+                    return {{"再 次 挑 战", {1400, 520, 180, 44}, .82}};
+                return {};
+            };
+        } else {
+            s.words["restart"] = {s.word("重新挑战", .55, .5)};
+        }
+        s.words["realm"] = {s.word("01:43:12", .47, .121, .06)};
+        double requested = -1;
+        int escapeCount = 0, requests = 0;
+        uint64_t frameSequence = 0;
+        s.c.sourceSequence = [&] { return ++frameSequence; };
+        s.action = [&](const auto &event) {
+            if (s.keyUp(event, 0x29)) {
+                ++escapeCount;
+                s.scene = "restart";
+            }
+            if (s.leftUp(event) && s.scene == "restart") {
+                ++requests;
+                requested = s.clock.time;
+                if (scenario == "previous-reward")
+                    s.scene = requests == 1 ? "blank" : "arena-without-exit-icon";
+                else
+                    s.scene = scenario == "overworld" ? "world" : "arena-without-exit-icon";
+            }
+        };
+        s.clock.tick = [&] {
+            if (requested < 0)
+                return;
+            const auto age = s.clock.time - requested;
+            if (scenario == "previous-reward" && requests == 1 && s.scene == "blank" && age > .5) {
+                s.scene = "previous-reward";
+            } else if (scenario == "timer-reset" || scenario == "timer-kept-running") {
+                const QString timer = scenario == "timer-reset"
+                    ? (age < .4 ? "03:58:95" : "03:58:78")
+                    : (age < .4 ? "01:42:98" : "01:42:77");
+                s.words[s.scene] = {s.word(timer, .47, .121, .06)};
+            } else if (scenario == "unrecognized-confirm") {
+                s.words[s.scene] = {s.word("确认", .62, .65)};
+            } else if (age > .25 && scenario == "duplicate-frame") {
+                s.c.sourceSequence = [&] { return frameSequence; };
+            }
+        };
+        QJsonObject diagnostic;
+        s.c.diagnostic = [&](QString, QJsonObject details) { diagnostic = details; };
+        s.show("realm");
+        const auto health = [&] {
+            return scenario == "old-health"
+                || (scenario == "previous-reward" && requests == 2)
+                || (requested >= 0 && (scenario == "new-health" || scenario == "scaled-button" || scenario == "overworld"
+                                       || scenario == "unrecognized-confirm" || scenario == "duplicate-frame"));
+        };
+        if (scenario == "new-health" || scenario == "scaled-button" || scenario == "timer-reset"
+            || scenario == "previous-reward") {
+            restartBossDomain(s.c, health);
+            QVERIFY(s.clock.time - requested < 2.);
+            QVERIFY(diagnostic.isEmpty());
+        } else {
+            QVERIFY_EXCEPTION_THROWN(restartBossDomain(s.c, health), NavigationFailure);
+            QCOMPARE(diagnostic["clicks"].toArray().size(), 1);
+            QCOMPARE(diagnostic["request_sent"].toBool(), true);
+            if (scenario == "overworld")
+                QVERIFY(diagnostic["last_observation"].toObject()["world_marker"].toBool());
+            if (scenario == "unrecognized-confirm")
+                QVERIFY(diagnostic["last_observation"].toObject()["pending_modal"].toBool());
+        }
+        const int expectedRequests = scenario == "previous-reward" ? 2 : 1;
+        QCOMPARE(s.clicks(), expectedRequests);
+        QCOMPARE(escapeCount, expectedRequests);
         QVERIFY(s.input.idle());
     }
     void mergeRequiresResultAndHandlesSuppressedConfirmation() {

@@ -425,6 +425,7 @@ struct CaptureDesktopRunSdk {
     std::chrono::nanoseconds interval{};
     std::optional<FramePacer> pacer;
     std::chrono::steady_clock::time_point next{};
+    std::chrono::steady_clock::time_point duplicationOpened{};
     i64 recoveryBegan = 0;
     QRect rect;
     bool changed = false;
@@ -506,6 +507,7 @@ struct CaptureDesktopRunSdk {
             break;
         case rust::WorkflowOp::DesktopRunCreateDuplication:
             duplication = std::make_unique<Duplication>(trackWindow ? rect : initial);
+            duplicationOpened = std::chrono::steady_clock::now();
             break;
         case rust::WorkflowOp::DesktopRunClearChanged:
             changed = false;
@@ -515,6 +517,12 @@ struct CaptureDesktopRunSdk {
             break;
         case rust::WorkflowOp::DesktopRunImageNull:
             out[0] = image.isNull();
+            break;
+        case rust::WorkflowOp::DesktopRunFirstFrameTimedOut:
+            out[0] = std::chrono::steady_clock::now() - duplicationOpened >= std::chrono::milliseconds(1500);
+            break;
+        case rust::WorkflowOp::DesktopRunReportFirstFrameRetry:
+            c.desktopRecovery("DXGI 未收到画面，正在重新建立桌面复制");
             break;
         case rust::WorkflowOp::DesktopRunImageChanged:
             out[0] = changed;

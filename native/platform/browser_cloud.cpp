@@ -47,19 +47,41 @@ bool cloudTarget(const QJsonObject &page) {
 const QString installTap = QString::fromUtf8(R"JS(
 (() => {
   if (location.origin !== 'https://mc.kurogames.com' || (location.pathname !== '/cloud' && !location.pathname.startsWith('/cloud/'))) return;
+  // Adapted from ok-script 3.0.14 BrowserCaptureMethod. A background cloud
+  // tab must not turn a browser pointer-lock rejection into an in-game Escape.
+  if (!window.__okwwRequestPointerLock) {
+    let locked = null;
+    const changed = () => document.dispatchEvent(new Event('pointerlockchange'));
+    window.__okwwRequestPointerLock = function () {
+      if (locked !== this) { locked = this; changed(); }
+      return Promise.resolve();
+    };
+    Object.defineProperty(Document.prototype, 'pointerLockElement', {
+      configurable: true, get() { return locked; }
+    });
+    Element.prototype.requestPointerLock = window.__okwwRequestPointerLock;
+    Document.prototype.exitPointerLock = function () {
+      if (locked) { locked = null; changed(); }
+    };
+  }
+  for (const element of document.querySelectorAll('video, canvas')) {
+    if (Object.prototype.hasOwnProperty.call(element, 'requestPointerLock'))
+      element.requestPointerLock = window.__okwwRequestPointerLock;
+  }
   if (window.__okwwReadCloudFrame) return;
   const peers = [];
   const Native = window.RTCPeerConnection;
   if (Native) {
-    window.RTCPeerConnection = new Proxy(Native, {construct(target, args, type) {
+    const registered = new Proxy(Native, {construct(target, args, type) {
       const connection = Reflect.construct(target, args, type);
       peers.push(new WeakRef(connection));
       return connection;
     }});
-    if (window.webkitRTCPeerConnection === Native) window.webkitRTCPeerConnection = window.RTCPeerConnection;
+    if (window.webkitRTCPeerConnection === Native) window.webkitRTCPeerConnection = registered;
+    window.RTCPeerConnection = registered;
   }
   const area = el => { const r = el.getBoundingClientRect(); return r.width * r.height; };
-  const live = track => track && track.kind === 'video' && track.readyState === 'live' && !track.muted;
+  const live = track => track && track.kind === 'video' && track.readyState === 'live';
   const surface = document.createElement('canvas');
   const ctx = surface.getContext('2d', {alpha: false});
   let tap = null;
@@ -84,7 +106,7 @@ const QString installTap = QString::fromUtf8(R"JS(
         const pc = peers[i].deref();
         if (!pc || pc.signalingState === 'closed') { peers.splice(i, 1); continue; }
         for (const receiver of pc.getReceivers()) {
-          if (!live(receiver.track)) continue;
+          if (!live(receiver.track) || receiver.track.muted) continue;
           const settings = receiver.track.getSettings();
           const size = (settings.width || 0) * (settings.height || 0);
           if (size > pixels) { pixels = size; track = receiver.track; }
@@ -115,8 +137,8 @@ const QString installTap = QString::fromUtf8(R"JS(
     if (!tap.frame || tap.sent === tap.version) return {state: 'waiting'};
     let element = video;
     if (!element) {
-      for (const canvas of document.querySelectorAll('canvas'))
-        if (area(canvas) > (element ? area(element) : 0)) element = canvas;
+      for (const candidate of document.querySelectorAll('canvas, video'))
+        if (area(candidate) > (element ? area(element) : 0)) element = candidate;
     }
     const rect = element ? element.getBoundingClientRect() : {x: 0, y: 0, width: innerWidth, height: innerHeight};
     let {x, y, width, height} = rect;
@@ -292,8 +314,16 @@ QJsonObject browserKey(int hid, bool down, int modifiers) {
         default: fail(QString("浏览器键鼠不支持此按键码：%1").arg(hid));
         }
     }
-    return {{"type", down ? "rawKeyDown" : "keyUp"}, {"key", key}, {"code", code},
-            {"windowsVirtualKeyCode", vk}, {"nativeVirtualKeyCode", vk}, {"modifiers", modifiers}};
+    QJsonObject event{{"type", down ? "rawKeyDown" : "keyUp"}, {"key", key}, {"code", code},
+                      {"windowsVirtualKeyCode", vk}, {"nativeVirtualKeyCode", vk}, {"modifiers", modifiers}};
+    if (hid >= 224 && hid <= 231) event["location"] = hid < 228 ? 1 : 2;
+    if (down && (key.size() == 1 || hid == 40) && !(modifiers & 7)) {
+        const auto printable = hid == 40 ? QString("\r") : key;
+        event["type"] = "keyDown";
+        event["text"] = printable;
+        event["unmodifiedText"] = printable;
+    }
+    return event;
 }
 } // namespace
 
@@ -379,7 +409,9 @@ void ensureCloudPage(const BrowserInstallation &browser) {
     const QStringList args{"--user-data-dir=" + QDir::toNativeSeparators(browser.profile), "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
                            "--window-size=1920,1080", "--force-color-profile=srgb", "--force-device-scale-factor=1",
                            "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-                           "--disable-backgrounding-occluded-windows", "--no-first-run", "--no-default-browser-check", cloudUrl};
+                           "--disable-backgrounding-occluded-windows", "--disable-features=CalculateNativeWinOcclusion",
+                           "--disable-direct-composition", "--webrtc-ip-handling-policy=default",
+                           "--no-first-run", "--no-default-browser-check", cloudUrl};
     if (!QProcess::startDetached(browser.path, args)) fail("无法启动专用 " + browser.name + " 窗口");
     lastOpen[browser.profile] = nowNs();
 }
@@ -397,6 +429,7 @@ void CloudBrowser::prepare(const QString &preference, bool openIfNeeded) {
 struct CloudBrowser::Session {
     Http httpSession = debuggerHttp(), connection = http(nullptr), socket = http(nullptr);
     QString rootFrame;
+    i64 lastVideoFrame = 0, lastPageFrame = 0;
     int id = 0, buttons = 0, modifiers = 0;
     QPoint point{viewport.width() / 2, viewport.height() / 2};
     std::set<int> keys;
@@ -486,7 +519,9 @@ struct CloudBrowser::Session {
     void key(int code, bool down) {
         if (down == keys.contains(code)) return;
         const auto mask = modifier(code);
-        const auto next = down ? modifiers | mask : modifiers & ~mask;
+        const auto counterpart = code < 228 ? code + 4 : code - 4;
+        const auto next = down ? modifiers | mask :
+            mask && keys.contains(counterpart) ? modifiers : modifiers & ~mask;
         const auto params = browserKey(code, down, next);
         if (down) keys.insert(code); else keys.erase(code);
         modifiers = next;
@@ -516,12 +551,23 @@ QImage CloudBrowser::frame() {
         }
         const auto packet = session_->evaluate("window.__okwwReadCloudFrame?.() ?? {state: 'page'}");
         const auto mode = packet["state"].toString();
-        if (mode == "waiting" && video_) return {};
-        const auto bytes = (mode == "video") ? packet["jpg"].toString() :
-            session_->command("Page.captureScreenshot", {{"format", "jpeg"}, {"quality", 92}, {"fromSurface", true}})["data"].toString();
-        auto picture = QImage::fromData(QByteArray::fromBase64(bytes.toLatin1()), "JPEG");
+        const bool videoFrame = mode == "video";
+        const auto now = nowNs();
+        if (!videoFrame) {
+            // Match the upstream fallback when the video pauses or is replaced.
+            // Give normal gaps room so page capture cannot slow down input.
+            if (mode == "waiting" && session_->lastVideoFrame && now - session_->lastVideoFrame < 250000000LL)
+                return {};
+            if (session_->lastPageFrame && now - session_->lastPageFrame < 120000000LL)
+                return {};
+        }
+        const auto bytes = videoFrame ? packet["jpg"].toString() :
+            session_->command("Page.captureScreenshot", {{"format", "png"}, {"fromSurface", true}})["data"].toString();
+        auto picture = QImage::fromData(QByteArray::fromBase64(bytes.toLatin1()), videoFrame ? "JPEG" : "PNG");
         if (picture.isNull()) fail("网页已连接，但浏览器返回了无效画面");
-        video_ = mode == "video";
+        if (videoFrame) session_->lastVideoFrame = now;
+        else session_->lastPageFrame = now;
+        video_ = videoFrame;
         ready_ = true;
         if (!video_) return picture.size() == viewport ? picture : picture.scaled(viewport);
         const QRectF rect(packet["x"].toDouble(), packet["y"].toDouble(), packet["width"].toDouble(), packet["height"].toDouble());
@@ -563,7 +609,7 @@ void CloudBrowser::key(int code, bool down) {
 void CloudBrowser::wheel(int steps) {
     std::lock_guard lock(mutex_);
     if (!ready_ || !session_) fail("网页云游戏画面尚未就绪");
-    session_->mouse("mouseWheel", "none", -steps * 120);
+    session_->mouse("mouseWheel", "none", -steps * 100);
 }
 void CloudBrowser::release() noexcept {
     std::lock_guard lock(mutex_);

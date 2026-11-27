@@ -234,7 +234,7 @@ impl Host {
                         let mut origin = [0.; 3];
                         if self.flag(Op::InputButtonsEmpty, &[])? {
                             let home = self.input_number(2.)?;
-                            self.action(Op::InputSendMove, &[-home, -home])?;
+                            self.input_counts(-home, -home, false)?;
                             self.action(Op::ExecutionWait, &[self.input_number(3.)?])?;
                         } else {
                             if !self.flag(Op::InputHasPosition, &[])? {

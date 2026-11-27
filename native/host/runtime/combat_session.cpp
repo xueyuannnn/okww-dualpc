@@ -726,6 +726,7 @@ void CombatSession::switchNext(Character &previous, bool freeIntro, bool targetL
                     const auto timestamp = now();
                     const bool intro = a[0] != 0;
                     decision = chooseSwitch(previous.state, candidates, intro, freezes, timestamp);
+                    const bool remote = remoteDesktopCombat();
                     if (!macro_ && !intro && supportHandoffTarget_ == previous.state.index &&
                         previous.state.role != Role::MainDps && decision.index != previous.state.index) {
                         const auto chosen = std::find_if(candidates.begin(), candidates.end(), [&](const auto &entry) {
@@ -734,7 +735,8 @@ void CombatSession::switchNext(Character &previous, bool freeIntro, bool targetL
                         std::vector<SwitchCandidate> damage;
                         if (chosen != candidates.end() && chosen->character->role != Role::MainDps) {
                             for (const auto &entry : candidates)
-                                if (entry.priority == chosen->priority && entry.character->role == Role::MainDps &&
+                                if (entry.character->role == Role::MainDps && entry.priority > 0 &&
+                                    (entry.priority == chosen->priority || (remote && entry.priority >= 200)) &&
                                     (!entry.character->switchCoolingDown(freezes, timestamp) ||
                                      chosen->character->switchCoolingDown(freezes, timestamp)))
                                     damage.push_back(entry);
@@ -799,7 +801,11 @@ void CombatSession::switchNext(Character &previous, bool freeIntro, bool targetL
                     break;
                 }
                 case rust::SessionOp::TapTargetIndex: {
-                    tap(QString::number(target->state.index + 1));
+                    tap(QString::number(target->state.index + 1), 0., -1., a[0]);
+                    break;
+                }
+                case rust::SessionOp::SwitchFrameSequence: {
+                    out[0] = double(context_.frameVersion);
                     break;
                 }
                 case rust::SessionOp::TargetIndex: {

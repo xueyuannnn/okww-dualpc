@@ -836,6 +836,9 @@ double EchoFarm::rustTravel(int method) {
         case rust::WorkflowOp::DesktopCapture:
             out[0] = c_.streamedCapture;
             break;
+        case rust::WorkflowOp::RemoteEchoRun:
+            out[0] = combat_.remoteDesktopCombat();
+            break;
         case rust::WorkflowOp::RestartEchoDomain: {
             restartBossDomain(c_, [&] { return combat_.hasHealthBar(); });
             break;
@@ -862,6 +865,7 @@ double EchoFarm::rustTravel(int method) {
         }
         case rust::WorkflowOp::SetEchoCombatRequired: {
             combatOptions->required = a[0] != 0;
+            combatOptions->target = realm_ && config_["Teleport to Boss"] == "Weekly Challenge";
             break;
         }
         case rust::WorkflowOp::EchoUseLiberation: {
@@ -877,7 +881,37 @@ double EchoFarm::rustTravel(int method) {
             break;
         }
         case rust::WorkflowOp::RunEchoCombatOnce: {
-            combat_.combatOnce(*combatOptions);
+            try {
+                combat_.combatOnce(*combatOptions);
+            } catch (const NavigationFailure &failure) {
+                const bool entryTimeout = dynamic_cast<const CombatEntryTimeout *>(&failure);
+                const bool weekly = realm_ && config_["Teleport to Boss"] == "Weekly Challenge";
+                if (!entryTimeout && !weekly) throw;
+                c_.refresh();
+                if (entryTimeout && (realm_ || navigation_.inRealm()) && c_.inTeam() && domainRewardObjective(c_)) {
+                    realm_ = true;
+                    if (c_.info) c_.info("再次挑战", "仍在上一轮领奖现场，重新进入本轮");
+                    out[0] = 1.;
+                } else if (!weekly || combat_.challengeResult() != std::optional<bool>(false)) {
+                    throw;
+                }
+            }
+            break;
+        }
+        case rust::WorkflowOp::EchoWeeklyRoundOutcome: {
+            if (c_.inTeam() && combat_.hasHealthBar()) {
+                out[0] = 2.;
+            } else if (const auto result = combat_.challengeResult()) {
+                out[0] = *result ? 1. : -1.;
+            } else if (world_.treasure() || findInteract(c_, "吸收|领取奖励|領取獎勵|Absorb|Claim Rewards")
+                       || (c_.inTeam() && domainRewardObjective(c_))) {
+                out[0] = 1.;
+            }
+            break;
+        }
+        case rust::WorkflowOp::EchoWeeklyRoundRecoveryInfo: {
+            c_.info("战歌重奏恢复", QString(a[0] < 0. ? "挑战失败，重开本轮（%1/2）"
+                                                        : "敌人仍在，继续本轮（%1/2）").arg(int(a[1])));
             break;
         }
         case rust::WorkflowOp::EchoPickupMethod: {
@@ -951,6 +985,10 @@ double EchoFarm::rustTravel(int method) {
                 fail("刷取次数超出上限");
             case 1:
                 fail("未确认周本材料领奖按钮，不重复消耗");
+            case 2:
+                fail("战歌重奏未确认本轮完成，已保留挑战现场和实际完成轮数");
+            case 3:
+                throw RestartNavigationFailure("再次挑战后仍在上一轮领奖现场，未计入新一轮");
             default:
                 fail("单轮刷取失败编号无效");
             }

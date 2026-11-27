@@ -506,7 +506,11 @@ class RuntimeTests : public QObject {
     }
     void ocrProgressCancellationPreservesRequestForTheNextTask() {
         const QString root = OKWW_SOURCE_ROOT;
+        #ifdef OKWW_WINDOWS7
+        auto models=root+"/assets/ocr/ppocrv6-small";
+#else
         auto models = root + "/assets/ocr/ppocrv5";
+#endif
         if (!QFile::exists(models + "/det/det.onnx"))
             models = root + "/.venv/Lib/site-packages/onnxocr/models/ppocrv5";
         if (!QFile::exists(models + "/det/det.onnx")) QSKIP("OCR models absent");
@@ -536,7 +540,11 @@ class RuntimeTests : public QObject {
     void cancelledOcrCanSwitchInputShapesBetweenTasks() {
         try {
         const QString root=OKWW_SOURCE_ROOT;
+        #ifdef OKWW_WINDOWS7
+        auto models=root+"/assets/ocr/ppocrv6-small";
+#else
         auto models=root+"/assets/ocr/ppocrv5";
+#endif
         if(!QFile::exists(models+"/det/det.onnx"))models=root+"/.venv/Lib/site-packages/onnxocr/models/ppocrv5";
         if(!QFile::exists(models+"/det/det.onnx"))QSKIP("OCR models absent");
         Ocr ocr(models);
@@ -559,7 +567,11 @@ class RuntimeTests : public QObject {
     void ocrCanSwitchInputShapesWithoutCancellation() {
         try {
             const QString root=OKWW_SOURCE_ROOT;
-            auto models=root+"/assets/ocr/ppocrv5";
+            #ifdef OKWW_WINDOWS7
+        auto models=root+"/assets/ocr/ppocrv6-small";
+#else
+        auto models=root+"/assets/ocr/ppocrv5";
+#endif
             if(!QFile::exists(models+"/det/det.onnx"))models=root+"/.venv/Lib/site-packages/onnxocr/models/ppocrv5";
             if(!QFile::exists(models+"/det/det.onnx"))QSKIP("OCR models absent");
             Ocr ocr(models);const auto source=readImage(root+"/assets/images/38.png");
@@ -578,9 +590,11 @@ class RuntimeTests : public QObject {
         input.move({400, 300});
         QCOMPARE(h.clock.time, h.events.last()["time"].toDouble());
         int x = 0, y = 0;
-        for (int i = 1; i < h.events.size(); ++i) {
-            x += h.events[i]["x"].toInt();
-            y += h.events[i]["y"].toInt();
+        for (const auto &event : h.events) {
+            const auto dx = event["x"].toInt();
+            if (dx < 0) continue;
+            x += dx;
+            y += event["y"].toInt();
         }
         QCOMPARE(x, 400); QCOMPARE(y, 300);
         const auto began = h.clock.time;
@@ -926,13 +940,20 @@ class RuntimeTests : public QObject {
         h.config.set("kmbox.counts_per_pixel_y", 1);
         Input input(h.config, {1920, 1080}, false, h.transport, h.execution);
         input.move({400, 300});
-        QCOMPARE(h.events.front()["x"].toInt(), -h.config.n("kmbox.home_counts"));
-        int x = 0, y = 0;
-        for (int i = 1; i < h.events.size(); ++i) {
-            x += h.events[i]["x"].toInt();
-            y += h.events[i]["y"].toInt();
-            QVERIFY(std::abs(h.events[i]["x"].toInt()) <= 127);
+        int home = 0, x = 0, y = 0;
+        for (const auto &event : h.events) {
+            const int dx = event["x"].toInt(), dy = event["y"].toInt();
+            if (dx < 0) {
+                QCOMPARE(dx, dy);
+                QVERIFY(std::abs(dx) <= h.config.n("kmbox.move_chunk"));
+                home += dx;
+            } else {
+                x += dx;
+                y += dy;
+                QVERIFY(dx <= 127);
+            }
         }
+        QCOMPARE(home, -h.config.n("kmbox.home_counts"));
         QCOMPARE(x, 400);
         QCOMPARE(y, 300);
         input.buttonDown();

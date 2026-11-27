@@ -246,6 +246,9 @@ std::array<double, 3> Character::rustRun(rust::RotationMethod method, std::initi
                 case rust::RotationOp::Available:
                     out[0] = h.available(Skill(int(a[0])), int(a[1]), a[2] != 0, a[3] != 0);
                     break;
+                case rust::RotationOp::RemoteDesktopCombat:
+                    out[0] = h.remoteDesktopCombat();
+                    break;
                 case rust::RotationOp::Highlighted:
                     out[0] = h.highlighted(Skill(int(a[0])));
                     break;

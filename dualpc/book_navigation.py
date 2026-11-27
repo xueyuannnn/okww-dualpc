@@ -5,6 +5,9 @@ import re
 import cv2
 import numpy as np
 
+BOOK_WHEEL_POINT = (.53, .55)
+_BOOK_CONTROL = re.compile(r'索拉等[级級]|查看各等[级級]|本[周週]剩[余餘]|SOL3\s*Phase|preview\s*rewards', re.I)
+
 
 @dataclass
 class BookRow:
@@ -45,23 +48,43 @@ def similarity(left, right, stationary=False):
 def same_page(previous, current):
     return bool(previous) and len(previous) == len(current) and all(
         abs(a.y - b.y) <= .008 and (similarity(a, b, stationary=True) >= .86 or (
-            i == 0 and len(previous) >= 3 and not a.title and not b.title and a.y < .28 and b.y < .28))
+            i == 0 and len(previous) >= 3 and not a.title and not b.title and a.y < .30 and b.y < .30))
         for i, (a, b) in enumerate(zip(previous, current)))
 
 
-def overlap(previous, current):
+def _overlap(previous, current):
     best, best_score = None, 0.0
+    ambiguous = False
     for offset in range(len(previous)):
         count = min(len(previous) - offset, len(current))
         if count < 2:
             continue
-        scores = [similarity(previous[offset + i], current[i])
-                  if previous[offset + i].y - current[i].y >= -.008 else 0 for i in range(count)]
-        matched = sum(value >= .82 for value in scores)
-        quality = matched + sum(value for value in scores if value >= .82) / count
-        if matched >= 2 and all(value >= .82 for value in scores[1:]) and quality > best_score:
-            best, best_score = offset, quality
-    return best
+        displacement, scores = None, []
+        for index in range(count):
+            left, right = previous[offset + index], current[index]
+            dy = left.y - right.y
+            value = similarity(left, right)
+            if value >= .82 and dy >= -.008 and (displacement is None or abs(dy - displacement) <= .012):
+                if displacement is None:
+                    displacement = dy
+                scores.append(value)
+            elif 0 < index < count - 1:
+                break
+        else:
+            if len(scores) < 2:
+                continue
+            quality = len(scores) + sum(scores) / count
+            if quality > best_score + .08:
+                best, best_score = (offset, displacement > .008), quality
+                ambiguous = False
+            elif abs(quality - best_score) <= .08:
+                ambiguous = True
+    return None if ambiguous else best
+
+
+def overlap(previous, current):
+    result = _overlap(previous, current)
+    return result[0] if result is not None else None
 
 
 def read_rows(task):
@@ -72,6 +95,8 @@ def read_rows(task):
     if getattr(task, '_native_vision', {}).get('desktop', False):
         buttons.extend(task.find_feature('boss_proceed', box=area, threshold=.72, use_gray_scale=True))
     def has_button_body(button):
+        if (button.x + button.width / 2) >= width * .95:
+            return False
         y = (button.y + button.height / 2) / height
         band = frame[round((y - .006) * height):round((y + .006) * height),
                      round(.875 * width):round(.935 * width)]
@@ -80,7 +105,7 @@ def read_rows(task):
     text = task.ocr(box=task.box_of_screen(.39, .18, .97, .88), threshold=.65)
     title = lambda line: str(getattr(line, 'text', getattr(line, 'name', ''))).strip()
     for line in text:
-        if line.x + line.width / 2 >= width * .84 and re.fullmatch(
+        if width * .84 <= line.x + line.width / 2 < width * .95 and re.fullmatch(
                 r'前往|传送|傳送|直接挑[战戰]|Proceed|Go\s*to|Teleport|(?:Direct\s*)?Challenge|Challenge\s*Directly', title(line), re.I):
             buttons.append(line)
     unique = []
@@ -91,15 +116,44 @@ def read_rows(task):
     rows = []
     for button in sorted(unique, key=lambda b: b.y + b.height / 2):
         y = (button.y + button.height / 2) / height
-        top, bottom = round(max(.18, y - .10) * height), round(min(.88, y + .025) * height)
-        crop = frame[top:bottom, round(.40 * width):round(.87 * width)]
+        top, bottom = round(max(.205, y - .085) * height), round(min(.88, y + .025) * height)
+        crop = frame[top:bottom, round(.40 * width):round(.622 * width)]
         identity = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (192, 48), interpolation=cv2.INTER_AREA)
         identity = cv2.GaussianBlur(identity, (3, 3), .55)
-        names = [re.sub(r'\W', '', title(line)).lower() for line in text
-                 if width * .40 <= line.x + line.width / 2 <= width * .87
-                 and top <= line.y + line.height / 2 < button.y + button.height / 2]
+        names = []
+        for line in text:
+            value = title(line)
+            if (width * .40 <= line.x + line.width / 2 <= width * .622
+                    and top <= line.y + line.height / 2 < button.y + button.height / 2
+                    and any(c.isalpha() for c in value) and not _BOOK_CONTROL.search(value)):
+                names.append(re.sub(r'\W', '', value).casefold())
         rows.append(BookRow(button, identity, '|'.join(names), y))
     return rows
+
+
+def _at_boundary(task, from_end):
+    frame = getattr(task, 'frame', None)
+    if frame is None:
+        return None
+    height, width = frame.shape[:2]
+    top = round(.188 * height)
+    track = frame[top:round(.884 * height), round(.968 * width):round(.980 * width)]
+    bright = (track.min(axis=2) >= 190).astype(np.uint8)
+    _, _, stats, _ = cv2.connectedComponentsWithStats(bright)
+    thumbs = [row for row in stats[1:]
+              if row[2] >= max(1, width * 3 / 2560)
+              and row[3] >= max(3, height * 8 / 1440) and row[4] >= .75 * row[2] * row[3]]
+    if not thumbs:
+        return None
+    _, y, _, length, _ = max(thumbs, key=lambda row: row[3])
+    if from_end:
+        return top + y + length >= .864 * height
+    position = (top + y) / height
+    if position <= .211:
+        return True
+    return (.211 < position <= .261 and length >= .12 * height
+            and bool(task.ocr(box=task.box_of_screen(.37, .185, .96, .248),
+                              threshold=.65, match=_BOOK_CONTROL)))
 
 
 def _locate_book_target(task, serial, total, from_end=False):
@@ -107,15 +161,15 @@ def _locate_book_target(task, serial, total, from_end=False):
         raise ValueError('索拉指南目标序号超出范围')
 
     def scroll(amount):
-        task.scroll_relative(.53, .55, amount)
+        task.scroll_relative(*BOOK_WHEEL_POINT, amount)
         task.sleep(.45)
 
     def settled_overlap(previous):
         for sample in range(3):
             current = read_rows(task)
-            offset = overlap(previous, current)
-            if offset is not None:
-                return current, offset
+            match = _overlap(previous, current)
+            if match is not None:
+                return current, match
             if sample < 2:
                 task.sleep(.2)
         return current, None
@@ -132,9 +186,11 @@ def _locate_book_target(task, serial, total, from_end=False):
             if stable:
                 break
             previous = current
-        # Two independent upward resets also work when compression hides the thumb.
-        if reset >= 1 and stable:
-            break
+        if stable:
+            boundary = _at_boundary(task, from_end)
+            # Two resets allow for a scrollbar hidden by compression.
+            if boundary or (boundary is None and reset >= 1):
+                break
     else:
         raise RuntimeError('索拉指南未确认列表顶部，未点击副本')
     first, stalled = 1, 0
@@ -149,24 +205,21 @@ def _locate_book_target(task, serial, total, from_end=False):
             if same_page(previous, current):
                 row = current[requested - first]
                 return row
-            stalled += 1
-            if stalled >= 4:
-                break
-            continue
+            break
         previous = current
         scroll(-2)
-        current, offset = settled_overlap(previous)
-        if offset is None:
+        current, match = settled_overlap(previous)
+        if match is None:
             scroll(1)
-            current, offset = settled_overlap(previous)
-            if offset is None:
+            current, match = settled_overlap(previous)
+            if match is None:
                 break
             stalled += 1
-        elif offset == 0:
+        elif not any(match):
             stalled += 1
         else:
             stalled = 0
-        first += offset
+        first += match[0]
         if stalled >= 5:
             break
     task.screenshot('索拉指南选行未确认')

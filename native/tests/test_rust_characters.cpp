@@ -108,6 +108,30 @@ bool equal(const QJsonValue &a,const QJsonValue &b) {
 class RustCharacterTests final : public QObject {
     Q_OBJECT
   private slots:
+    void remoteMornyeResumesAttackingAfterOneElbowReset() {
+        test::RotationReplay host({
+            {"remote_desktop", true},
+            {"ready", QJsonArray{false, true, false}},
+            {"echo_dark_at", 100.04},
+            {"features", QJsonObject{{"has_target@target_box_long2", true}}},
+            {"con", 0.5},
+        });
+        CharacterState state;
+        state.index = 0;
+        state.current = true;
+        auto actor = makeCharacter("Mornye", host, state);
+        host.character = actor.get();
+        actor->perform();
+        int dodges = 0, attacks = 0;
+        for (const auto &entry : host.events) {
+            if (entry.toObject()["kind"] == "click") {
+                if (entry.toObject()["value"] == "right") ++dodges;
+                if (entry.toObject()["value"] == "left") ++attacks;
+            }
+        }
+        QCOMPARE(dodges, 1);
+        QVERIFY(attacks > 1);
+    }
     void gaugePixelsMatchOriginal_data(){
         QTest::addColumn<int>("scenario");
         for(int scenario=0;scenario<640;++scenario)QTest::newRow(qPrintable(QString::number(scenario)))<<scenario;

@@ -266,9 +266,8 @@ void OriginalInput::move(QPointF point) {
         else {
             QPoint origin;
             if (buttons_.isEmpty()) {
-                send({{"op", "move"},
-                      {"x", -config_.n("kmbox.home_counts")},
-                      {"y", -config_.n("kmbox.home_counts")}});
+                const int home = config_.n("kmbox.home_counts");
+                counts(-home, -home, false);
                 execution_.wait(config_.d("kmbox.home_wait"));
             } else {
                 if (!position_)

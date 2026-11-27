@@ -1,4 +1,5 @@
 #include "reference_instance.hpp"
+#include "runtime/ocr.hpp"
 #include <QtTest>
 #include <opencv2/imgproc.hpp>
 using namespace okww;
@@ -141,6 +142,36 @@ QJsonObject replay(int scene, bool rust, int *introReads = nullptr) {
 class InstanceContracts : public QObject {
     Q_OBJECT
   private slots:
+    void savedPreviousRewardObjective() {
+        const auto sample = qEnvironmentVariable("OKWW_REWARD_REPLAY");
+        const auto models = qEnvironmentVariable("OKWW_REPLAY_OCR_MODELS");
+        if (sample.isEmpty() || models.isEmpty()) QSKIP("Set reward replay image and OCR model paths");
+        auto image = readImage(sample);
+        QVERIFY(!image.empty());
+        const QString root = OKWW_SOURCE_ROOT;
+        QTemporaryDir directory;
+        Templates templates(root + "/assets/coco_annotations.json");
+        Profile profile(directory.path(), root + "/native/resources/catalog.json");
+        ClockProbe clock;
+        ExecutionGate gate;
+        Execution execution(gate, gate.start(), clock);
+        Input input(Config::defaults(), {image.cols, image.rows}, true,
+                    [](QJsonObject) { return QJsonObject{}; }, execution);
+        Ocr ocr(models);
+        int stage = 0;
+        TaskContext context(execution, input, templates, profile, [&] { return image; },
+            [&](const auto &frame, QRect area, double threshold) {
+                if (stage == 0) return ocr.read(frame, area, threshold);
+                return QVector<TextLine>{{"领取奖励后离开", area, .99}};
+            });
+        context.streamedCapture = true;
+        context.refresh();
+        QVERIFY(Navigation(context).inRealm());
+        QVERIFY(domainRewardObjective(context));
+        stage = 1;
+        context.refresh();
+        QVERIFY(!domainRewardObjective(context));
+    }
     void text_data() {
         QTest::addColumn<int>("scene");
         for (int i = 0; i < 2048; ++i)

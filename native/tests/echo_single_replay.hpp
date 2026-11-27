@@ -50,6 +50,9 @@ struct Probe {
     double time = 0, started_ = 0, wait_ = 0;
     bool enhanced_, realm_ = false, treasure_ = false, entryAtHeal_ = false, justEntered_ = false,
                     bypassWait_ = false, failed = false;
+    bool remote = false, failNextRestart = false;
+    int previousRewardReturns = 0;
+    QList<int> weeklyOutcomes;
     QString walkResult_ = "combat";
     QJsonObject config_;
     QJsonArray events;
@@ -240,6 +243,8 @@ inline bool World::walkToInteract(QString key, double timeout, bool required, do
 inline void World::walkToTreasure() { p.events.append("walk-treasure"); }
 inline void restartBossDomain(Context &c) {
     c.p.events.append("restart-domain");
+    if (std::exchange(c.p.failNextRestart, false))
+        throw RestartNavigationFailure("remote restart not confirmed");
     if (c.p.scene % 29 == 0)
         throw NavigationFailure("restart failed");
 }

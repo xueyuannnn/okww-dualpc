@@ -71,6 +71,7 @@ class CombatHost {
     virtual bool targetLocked() = 0;
     virtual void ensureElement(Character &character) = 0;
     virtual bool isAutoCombatTask() const = 0;
+    virtual bool remoteDesktopCombat() const { return false; }
     virtual void log(const QString &message) = 0;
     virtual int partyCount() { return static_cast<int>(characters().size()); }
     virtual void refreshObservation() { nextFrame(); }

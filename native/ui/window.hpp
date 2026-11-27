@@ -127,7 +127,7 @@ class Window final : public QMainWindow {
     QJsonObject taskProgress_;
     QList<QPointer<QWidget>> taskProgressPanels_;
     QWidget *buildExecutionProgress();
-    QPointer<QMessageBox> runtimeErrorDialog_;
+    QPointer<QDialog> runtimeErrorDialog_;
     void showExecutionError(const QString &error, QJsonObject event = {});
     QElapsedTimer taskRunClock_;
     QWidget *buildTaskInfo(bool trigger);

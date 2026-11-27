@@ -492,9 +492,10 @@ impl Host {
         }
         Ok(count > 0)
     }
-    fn book_page_overlap(&self, previous: usize, current: usize) -> Result<Option<usize>> {
+    fn book_page_overlap(&self, previous: usize, current: usize) -> Result<Option<(usize, bool)>> {
         let mut best = None;
         let mut best_score = 0.;
+        let mut ambiguous = false;
         for offset in 0..previous {
             let overlap = (previous - offset).min(current);
             if overlap < 2 {
@@ -503,27 +504,41 @@ impl Host {
             let mut matched = 0;
             let mut score = 0.;
             let mut invalid = false;
+            let mut displacement: Option<f64> = None;
             for i in 0..overlap {
                 let evidence = self.call(Op::CompareBookRows, &[(offset + i) as f64, i as f64])?;
                 let value = evidence[0];
-                if value >= 0.82 && evidence[1] >= -0.008 {
+                if value >= 0.82
+                    && evidence[1] >= -0.008
+                    && displacement.is_none_or(|dy| (dy - evidence[1]).abs() <= 0.012)
+                {
+                    displacement.get_or_insert(evidence[1]);
                     matched += 1;
                     score += value;
-                } else if i != 0 {
+                } else if i != 0 && i + 1 != overlap {
                     invalid = true;
                 }
             }
             // The first row can be clipped by the viewport edge. Two intact rows
             // still establish the same ordered suffix and its absolute position.
             let quality = matched as f64 + score / overlap as f64;
-            if !invalid && matched >= 2 && quality > best_score {
-                best = Some(offset);
-                best_score = quality;
+            if !invalid && matched >= 2 {
+                if quality > best_score + 0.08 {
+                    best = Some((offset, displacement.is_some_and(|dy| dy > 0.008)));
+                    best_score = quality;
+                    ambiguous = false;
+                } else if (quality - best_score).abs() <= 0.08 {
+                    ambiguous = true;
+                }
             }
         }
-        Ok(best)
+        Ok(if ambiguous { None } else { best })
     }
-    fn settled_book_overlap(&self, previous: usize, current: &mut usize) -> Result<Option<usize>> {
+    fn settled_book_overlap(
+        &self,
+        previous: usize,
+        current: &mut usize,
+    ) -> Result<Option<(usize, bool)>> {
         for sample in 0..3 {
             if let Some(offset) = self.book_page_overlap(previous, *current)? {
                 return Ok(Some(offset));
@@ -554,11 +569,15 @@ impl Host {
         // issuing a reset that would restart the list's rebound animation.
         if !from_end {
             count = self.scalar(Op::ReadProceedRows, &[])? as usize;
-            if count > 0 && self.flag(Op::BookAtTop, &[total])? {
+            let at_top = |rows| -> Result<bool> {
+                let boundary = self.scalar(Op::BookAtTop, &[0.])?;
+                Ok(boundary == 1. || (boundary < 0. && rows as f64 == total))
+            };
+            if count > 0 && at_top(count)? {
                 self.action(Op::StoreBookRows, &[])?;
                 self.action(Op::Sleep, &[0.2])?;
                 let observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
-                top_ready = observed == count && self.book_page_same(count)?;
+                top_ready = observed == count && self.book_page_same(count)? && at_top(observed)?;
                 count = observed;
             }
         }
@@ -581,11 +600,8 @@ impl Host {
                 let stable = observed == count && count > 0 && self.book_page_same(count)?;
                 count = observed;
                 if stable {
-                    top_ready = if from_end {
-                        reset >= 1
-                    } else {
-                        self.flag(Op::BookAtTop, &[total])? || reset >= 1
-                    };
+                    let boundary = self.scalar(Op::BookAtTop, &[f64::from(from_end)])?;
+                    top_ready = boundary == 1. || (boundary < 0. && reset >= 1);
                     break;
                 }
             }
@@ -595,6 +611,7 @@ impl Host {
         }
         if !top_ready {
             self.action(Op::BookSelectionFailure, &[serial, total, 0.])?;
+            return Err(HOST_ERROR);
         }
         let mut first = 1_usize;
         let mut stalled = 0;
@@ -618,23 +635,17 @@ impl Host {
                     target = Some(index);
                     break;
                 }
-                count = observed;
-                stalled += 1;
-                if stalled >= 4 {
-                    break;
-                }
-                continue;
+                // An appearing or disappearing first row changes every ordinal.
+                // Restart from the list boundary instead of clicking by the old offset.
+                self.action(Op::BookSelectionFailure, &[serial, total, 1.])?;
+                return Err(HOST_ERROR);
             }
             self.action(Op::StoreBookRows, &[])?;
             self.action(Op::Scroll, &[-2., wheel_x, wheel_y])?;
             self.action(Op::Sleep, &[0.45])?;
             let mut observed = self.scalar(Op::ReadProceedRows, &[])? as usize;
-            if let Some(offset) = self.settled_book_overlap(count, &mut observed)? {
-                if offset == 0 {
-                    stalled += 1;
-                } else {
-                    stalled = 0;
-                }
+            if let Some((offset, moved)) = self.settled_book_overlap(count, &mut observed)? {
+                stalled = if offset != 0 || moved { 0 } else { stalled + 1 };
                 first += offset;
                 count = observed;
             } else {
@@ -642,7 +653,7 @@ impl Host {
                 self.action(Op::Scroll, &[1., wheel_x, wheel_y])?;
                 self.action(Op::Sleep, &[0.35])?;
                 let mut recovered = self.scalar(Op::ReadProceedRows, &[])? as usize;
-                if let Some(offset) = self.settled_book_overlap(count, &mut recovered)? {
+                if let Some((offset, _)) = self.settled_book_overlap(count, &mut recovered)? {
                     first += offset;
                     count = recovered;
                 } else {

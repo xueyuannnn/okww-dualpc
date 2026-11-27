@@ -110,13 +110,13 @@ class DiagnosticsContracts final : public QObject {
         const auto root = profile.path();
         const auto images = root + "/screenshots/errors";
         put(root + "/logs/native.log", "native end");
-        put(root + "/logs/workshop.log", "workshop end");
+        put(root + "/logs/workshop.log", {});
         put(images + "/step.png", "step image");
         put(images + "/end.png", "error image");
         put(root + "/private/report.json", "outside the allowed diagnostic directory");
         const auto step = okww::runtime::saveDiagnostic(root, {{"phase", "task_step"},
                                                                {"screenshot", images + "/step.png"}});
-        const auto event = okww::runtime::saveDiagnostic(root, {{"phase", "task"},
+        const auto event = okww::runtime::saveDiagnostic(root, {{"event", "error"}, {"phase", "task"},
             {"screenshot", images + "/end.png"}, {"step_diagnostics",
                 QJsonArray{step["diagnostic_report"], root + "/private/report.json"}}});
         const QDir folder(event["diagnostic_directory"].toString());
@@ -129,6 +129,29 @@ class DiagnosticsContracts final : public QObject {
         QVERIFY(!report.contains("diagnostic_report") && !embedded.contains("diagnostic_directory"));
         for (const auto &name : {"native.log", "workshop.log", "screenshot.png", "steps/01/screenshot.png"})
             QVERIFY2(folder.exists(name), name);
+        QVERIFY(!step.contains("diagnostic_archive"));
+        const auto zip = event["diagnostic_archive"].toString();
+        QVERIFY2(QFileInfo(zip).isFile(), qPrintable(event["diagnostic_archive_error"].toString()));
+        QVERIFY(!report.contains("diagnostic_archive"));
+        put(folder.filePath("account.json"), "private");
+        QCOMPARE(writeDiagnosticArchive(folder), zip);
+        const auto artifacts = qEnvironmentVariable("OKWW_DIAGNOSTIC_TEST_ARTIFACTS");
+        if (!artifacts.isEmpty())
+            QVERIFY(QFile::copy(zip, artifacts + "/diagnostic.zip"));
+    }
+    void archiveFailurePreservesLocalReport() {
+        QTemporaryDir profile;
+        const auto root = profile.path();
+        const auto screenshot = root + "/screenshots/errors/oversize.png";
+        put(screenshot, "fixture");
+        QFile large(screenshot);
+        QVERIFY(large.open(QIODevice::ReadWrite));
+        QVERIFY(large.resize(33 * 1024 * 1024));
+        large.close();
+        const auto event = saveDiagnostic(root, {{"event", "error"}, {"screenshot", screenshot}});
+        QVERIFY(event.contains("diagnostic_archive_error"));
+        QVERIFY(!event.contains("diagnostic_archive"));
+        QVERIFY(QFileInfo(event["diagnostic_report"].toString()).isFile());
     }
 };
 QTEST_GUILESS_MAIN(DiagnosticsContracts)

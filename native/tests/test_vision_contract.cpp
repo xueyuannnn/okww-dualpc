@@ -223,6 +223,34 @@ template <class Vision> QJsonObject sceneTrace(int scene) {
 class VisionContracts : public QObject {
     Q_OBJECT
   private slots:
+    void remoteWeeklyBossKeepsCombatActive() {
+        const auto sample = qEnvironmentVariable("OKWW_UU_BOSS_REPLAY");
+        if (sample.isEmpty()) QSKIP("Set OKWW_UU_BOSS_REPLAY to the saved UU boss frame");
+        auto frame = readImage(sample);
+        QVERIFY(!frame.empty());
+        const QString root = OKWW_SOURCE_ROOT;
+        QTemporaryDir dir;
+        Templates templates(root + "/assets/coco_annotations.json");
+        Profile profile(dir.path(), root + "/native/resources/catalog.json");
+        ClockProbe clock;
+        ExecutionGate gate;
+        Execution execution(gate, gate.start(), clock);
+        Input input(Config::defaults(), {frame.cols, frame.rows}, true,
+                    [](QJsonObject) { return QJsonObject{}; }, execution);
+        TaskContext context(execution, input, templates, profile, [&] { return frame; },
+                            [](const auto &, QRect, double) { return QVector<TextLine>{}; });
+        context.streamedCapture = true;
+        CombatVision vision(context, root + "/native/resources/characters.json");
+        context.refresh();
+        QVERIFY(!vision.healthBar(false));
+        QVERIFY(vision.healthBar(true));
+
+        // The warm fill alone may come from the background or a skill effect.
+        const auto lower = gameBox(frame, .36, .069, .62, .083);
+        frame(cv::Rect(lower.x(), lower.y(), lower.width(), lower.height())).setTo(cv::Scalar{});
+        context.refresh();
+        QVERIFY(!vision.healthBar(true));
+    }
     void pipeline_data() {
         QTest::addColumn<int>("scene");
         for (int i = 0; i < 256; ++i)

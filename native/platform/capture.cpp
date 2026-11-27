@@ -1060,6 +1060,9 @@ struct CaptureFlowSdk {
                 fail("采集线程已经启动");
             case 1:
                 if (c.browser_) fail(c.desktopRecovery_.isEmpty() ? "网页云游戏首帧获取超时" : c.desktopRecovery_);
+                if (c.config_.s("capture.source") == "desktop" && c.config_.s("capture.local_backend") == "DXGI")
+                    fail(c.desktopRecovery_.isEmpty() ? "DXGI 首帧超时，请保持采集目标可见后重试"
+                                                       : "DXGI 首帧超时：" + c.desktopRecovery_);
                 fail("视频采集启动超时");
             case 2:
                 fail(c.error_);

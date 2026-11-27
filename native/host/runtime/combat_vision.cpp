@@ -1,3 +1,4 @@
+#include "opencv_geometry.hpp"
 #include "combat_vision.hpp"
 #include "gauge_analysis.hpp"
 #include "vision_abi.hpp"
@@ -847,9 +848,29 @@ bool CombatVision::healthBar(bool inCombat) {
         const auto bossBars = colorRectangles(image, {{4, 30, 245}, {75, 185, 255}},
             std::max(12., image.cols * 40. / 3840.), std::max(2., image.rows * 11.7 / 2160.),
             image.rows * 32. / 2160., bossArea, context_.streamedImage() ? .85 : .95);
-        return std::any_of(bossBars.begin(), bossBars.end(), [](const auto &bar) {
+        if (std::any_of(bossBars.begin(), bossBars.end(), [](const auto &bar) {
             return bar.box.width() >= bar.box.height() * 6;
-        });
+        })) return true;
+        if (inCombat && context_.streamedImage()) {
+            // Some bosses draw a continuous gold-to-red fill above a pale
+            // stagger gauge. The red-only range sees only part of that fill.
+            const auto top = gameBox(image, .34, .048, .66, .065);
+            cv::Mat hsv, warm;
+            cv::cvtColor(image(cv::Rect(top.x(), top.y(), top.width(), top.height())), hsv, cv::COLOR_BGR2HSV);
+            cv::inRange(hsv, cv::Scalar(0, 145, 212), cv::Scalar(32, 255, 255), warm);
+            const auto lower = gameBox(image, .36, .069, .62, .083);
+            cv::Mat pale;
+            cv::inRange(image(cv::Rect(lower.x(), lower.y(), lower.width(), lower.height())),
+                        cv::Scalar(210, 210, 210), cv::Scalar(255, 255, 255), pale);
+            const auto hasLongLine = [](const cv::Mat &mask, double coverage) {
+                for (int y = 0; y < mask.rows; ++y) {
+                    if (cv::countNonZero(mask.row(y)) >= mask.cols * coverage) return true;
+                }
+                return false;
+            };
+            return hasLongLine(warm, .65) && hasLongLine(pale, .83);
+        }
+        return false;
     }
     const std::array args{double(inCombat)};
     return rust::visionRun(

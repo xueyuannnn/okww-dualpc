@@ -41,6 +41,10 @@ case rust::WorkflowOp::EchoCombatFailure: {
         fail("刷取次数超出上限");
     case 1:
         fail("未确认周本材料领奖按钮，不重复消耗");
+    case 2:
+        fail("战歌重奏未确认本轮完成");
+    case 3:
+        throw RestartNavigationFailure("再次挑战后仍在上一轮领奖现场");
     default:
         fail("单轮刷取失败编号无效");
     }
@@ -133,6 +137,10 @@ case rust::WorkflowOp::EchoWeeklyCategory: {
     out[0] = config_["Teleport to Boss"] == "Weekly Challenge";
     break;
 }
+case rust::WorkflowOp::RemoteEchoRun: {
+    out[0] = remote;
+    break;
+}
 case rust::WorkflowOp::EnterEchoFromF: {
     enterFromF();
     break;
@@ -211,7 +219,21 @@ case rust::WorkflowOp::RestartEchoDomain: {
     break;
 }
 case rust::WorkflowOp::RunEchoCombatOnce: {
-    combat_.combatOnce(*combatOptions);
+    if (previousRewardReturns > 0) {
+        --previousRewardReturns;
+        events.append("previous-reward");
+        out[0] = 1.;
+    } else {
+        combat_.combatOnce(*combatOptions);
+    }
+    break;
+}
+case rust::WorkflowOp::EchoWeeklyRoundOutcome: {
+    out[0] = weeklyOutcomes.isEmpty() ? 1. : weeklyOutcomes.takeFirst();
+    break;
+}
+case rust::WorkflowOp::EchoWeeklyRoundRecoveryInfo: {
+    events.append(QJsonArray{"weekly-recovery", a[0], a[1], totalCompleted_});
     break;
 }
 case rust::WorkflowOp::RunEchoInteractions: {

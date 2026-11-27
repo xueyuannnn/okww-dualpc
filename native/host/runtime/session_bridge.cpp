@@ -591,7 +591,7 @@ bool CombatSession::rustAccess(rust::SessionOp op, const double *a, double *out,
         case 14:
             throw CombatInterrupted("切换角色时队伍界面消失");
         case 15:
-            throw NavigationFailure("等待进入战斗超时，未记录为完成");
+            throw CombatEntryTimeout();
         case 16:
             try {
                 std::rethrow_exception(error);

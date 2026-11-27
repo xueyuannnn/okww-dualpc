@@ -2,6 +2,7 @@
 #include "windows_compat.hpp"
 #include "browser_cloud.hpp"
 #include <QDesktopServices>
+#include <QUrlQuery>
 #ifdef OKWW_NATIVE_ONLY
 #include "runtime/diagnostics.hpp"
 #endif
@@ -887,6 +888,7 @@ QWidget *Window::devicePage() {
     addField(af, "游戏机桌面高度", "kmbox.desktop_height", true, 1, 16384);
     addField(af, "回到角落的移动量", "kmbox.home_counts", true, 1, 32767);
     addField(af, "每次最大移动量", "kmbox.move_chunk", true, 1, 32767);
+    settings_["kmbox.move_chunk"]->setToolTip("回到角落和移动到目标位置时都按此上限分段发送。");
     addDecimal(af, "回到角落后等待（秒）", "kmbox.home_wait", 0, 1);
     addDecimal(af, "移动间隔（秒）", "kmbox.move_interval", 0, .1);
     addDecimal(af, "定位后等待（秒）", "kmbox.position_settle", .11, 1);
@@ -1533,27 +1535,111 @@ void Window::showExecutionError(const QString &error, QJsonObject event) {
         return;
     }
     const auto details = QString::fromUtf8(QJsonDocument(event).toJson(QJsonDocument::Indented));
-    auto dialog = new QMessageBox(QMessageBox::Warning, "自动操作已暂停", error.left(500),
-                                  QMessageBox::Ok, this);
+    auto dialog = new QDialog(this);
     runtimeErrorDialog_ = dialog;
     dialog->setObjectName("runtimeErrorDialog");
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setInformativeText("自动任务已暂停并释放按键，采集预览保持连接。修正问题后可点“重试任务”。" +
-        (event.contains("diagnostic_write_error") ? "\n诊断保存失败：" + event["diagnostic_write_error"].toString()
-         : "\n反馈问题时，请发送整个诊断文件夹。文件夹内可能包含游戏截图和窗口标题。"));
-    dialog->setDetailedText(details);
-    dialog->button(QMessageBox::Ok)->setText("知道了");
-    dialog->setDefaultButton(QMessageBox::Ok);
-    auto retry = dialog->addButton("重试任务", QMessageBox::AcceptRole);
-    retry->setObjectName("retryFailedTask");
-    connect(retry, &QPushButton::clicked, this, [this] { startTask(retryTaskId_); });
-    auto copy = dialog->addButton("复制详情", QMessageBox::ActionRole);
-    connect(copy, &QPushButton::clicked, dialog, [details] { QApplication::clipboard()->setText(details); });
+    connect(dialog, &QDialog::finished, this, [this, dialog] {
+        if (runtimeErrorDialog_ == dialog)
+            runtimeErrorDialog_.clear();
+    });
+    auto layout = classic::dialogLayout(*dialog, "自动操作已暂停", {}, {620, 345});
+    auto addText = [&](const QString &text, const QString &name) {
+        auto label = new QLabel(text, dialog);
+        label->setObjectName(name);
+        label->setTextFormat(Qt::PlainText);
+        label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        label->setWordWrap(true);
+        layout->addWidget(label);
+        return label;
+    };
+    addText(error.left(500), "runtimeErrorSummary");
+    const auto archive = event["diagnostic_archive"].toString();
     const auto folder = event["diagnostic_directory"].toString();
-    if (!folder.isEmpty()) {
-        auto open = dialog->addButton("打开诊断文件夹", QMessageBox::ActionRole);
-        connect(open, &QPushButton::clicked, dialog, [folder] { QDesktopServices::openUrl(QUrl::fromLocalFile(folder)); });
+    const bool hasArchive = !archive.isEmpty() && QFileInfo(archive).isFile();
+    const bool hasFolder = !folder.isEmpty() && QFileInfo(folder + "/report.json").isFile();
+    const auto saveError = event["diagnostic_write_error"].toString();
+    QString instructions;
+    if (hasArchive) {
+        instructions = "诊断包已就绪 · " + QFileInfo(archive).fileName()
+            + "\n把 ZIP 作为附件发给 " + product::supportEmail
+            + "，并简述出错前的操作。发送前可检查包内的截图和窗口标题。";
+    } else if (hasFolder) {
+        instructions = "诊断包生成失败。可打开诊断文件夹，将其中的报告、日志和截图发给 "
+            + product::supportEmail + "。";
+    } else {
+        instructions = "可展开并复制错误详情，发送给 " + product::supportEmail + "。";
+        if (!saveError.isEmpty()) instructions += "\n保存诊断失败 · " + saveError;
     }
+    auto guidance = addText(instructions, "runtimeErrorGuidance");
+    auto feedback = new QHBoxLayout;
+    layout->addLayout(feedback);
+    if (hasArchive || hasFolder) {
+        auto open = new QPushButton(hasArchive ? "打开诊断包位置" : "打开诊断文件夹", dialog);
+        open->setObjectName("openDiagnostic");
+        open->setProperty("primary", true);
+        classic::setFluentIcon(open, "Folder", true);
+        feedback->addWidget(open);
+        connect(open, &QPushButton::clicked, dialog, [archive, folder, hasArchive, guidance] {
+            const auto destination = hasArchive ? QFileInfo(archive).absolutePath() : folder;
+            if (!QDesktopServices::openUrl(QUrl::fromLocalFile(destination)))
+                guidance->setText("无法打开文件夹。诊断文件位置\n" + QDir::toNativeSeparators(hasArchive ? archive : folder));
+        });
+    }
+    auto mail = new QPushButton("联系开发者", dialog);
+    mail->setObjectName("contactDeveloper");
+    classic::setFluentIcon(mail, "Mail");
+    feedback->addWidget(mail);
+    feedback->addStretch();
+    connect(mail, &QPushButton::clicked, dialog, [event, archive, hasArchive, guidance] {
+        QUrl url;
+        url.setScheme("mailto");
+        url.setPath(product::supportEmail);
+        QUrlQuery query;
+        query.addQueryItem("subject", "OK-WW 双机版故障反馈 · " + product::releaseVersion);
+        const auto attachment = hasArchive ? "\r\n请手动附上 " + QFileInfo(archive).fileName() : QString{};
+        query.addQueryItem("body", "出错前的操作：\r\n\r\n诊断编号：" + event["diagnostic_id"].toString() + attachment);
+        url.setQuery(query);
+        const auto copied = !QDesktopServices::openUrl(url);
+        if (copied) {
+            QApplication::clipboard()->setText(product::supportEmail);
+            guidance->setText(guidance->text() + "\n未找到邮件客户端，已复制反馈邮箱。");
+        }
+    });
+
+    auto detailsToggle = new QPushButton("查看错误详情", dialog);
+    detailsToggle->setObjectName("showRuntimeErrorDetails");
+    detailsToggle->setCheckable(true);
+    layout->addWidget(detailsToggle, 0, Qt::AlignLeft);
+    auto detailView = new QPlainTextEdit(details, dialog);
+    detailView->setObjectName("runtimeErrorDetails");
+    detailView->setReadOnly(true);
+    detailView->hide();
+    layout->addWidget(detailView, 1);
+    auto copy = new QPushButton("复制详情", dialog);
+    copy->hide();
+    layout->addWidget(copy, 0, Qt::AlignLeft);
+    connect(copy, &QPushButton::clicked, dialog, [details] { QApplication::clipboard()->setText(details); });
+    connect(detailsToggle, &QPushButton::toggled, dialog, [dialog, detailView, copy, detailsToggle](bool expanded) {
+        detailView->setVisible(expanded);
+        copy->setVisible(expanded);
+        detailsToggle->setText(expanded ? "收起错误详情" : "查看错误详情");
+        const auto screen = dialog->screen()->availableGeometry().height();
+        dialog->resize(dialog->width(), qMin(expanded ? 570 : 345, screen - 60));
+    });
+    auto actions = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    auto close = actions->button(QDialogButtonBox::Close);
+    close->setText("知道了");
+    close->setDefault(true);
+    auto retry = actions->addButton("重试任务", QDialogButtonBox::ActionRole);
+    retry->setObjectName("retryFailedTask");
+    connect(actions, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(retry, &QPushButton::clicked, dialog, [this, dialog] {
+        const auto id = retryTaskId_;
+        dialog->accept();
+        startTask(id);
+    });
+    layout->addWidget(actions);
     showNormal();
     raise();
     activateWindow();

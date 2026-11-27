@@ -5,6 +5,14 @@ class NavigationFailure : public std::runtime_error {
   public:
     explicit NavigationFailure(const QString &reason) : std::runtime_error(reason.toUtf8().constData()) {}
 };
+class RestartNavigationFailure final : public NavigationFailure {
+  public:
+    using NavigationFailure::NavigationFailure;
+};
+class CombatEntryTimeout final : public NavigationFailure {
+  public:
+    CombatEntryTimeout() : NavigationFailure("等待进入战斗超时，未记录为完成") {}
+};
 // Recovery retries navigation/observation checkpoints only. Resource decisions
 // and actions are never repeated by this wrapper.
 class Navigation {

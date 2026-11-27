@@ -478,24 +478,42 @@ impl Host {
     }
     fn mornye_airborne(&self) -> ActionResult {
         let detect = self.skill_available(ECHO)?;
+        let remote = self.truth(Op::RemoteDesktopCombat, &[])?;
+        let mut elbow_resolved = false;
         let start = self.now()?;
         while self.now()? - start < 10. && self.mornye_air()? {
-            if self.elbow(detect)? {
+            let elbow = self.elbow(detect)?;
+            if remote {
+                if !elbow {
+                    elbow_resolved = false;
+                } else if !elbow_resolved {
+                    // A dark echo icon can persist on compressed video.
+                    // Dodge once per disappearance and keep the rotation moving.
+                    self.sleep(0.12, true)?;
+                    if self.mornye_air()? && self.elbow(detect)? {
+                        self.click(true, -1.)?;
+                        elbow_resolved = true;
+                    }
+                }
+            } else if elbow {
                 self.wait_elbow(detect)?;
             }
+            let detect_elbow = detect && !elbow_resolved;
             self.stateful_lib(0.1)?;
             if self.mornye_air()?
                 && self.truth(Op::Forte, &[0.])?
-                && self.heavy_forte(|| Ok(self.truth(Op::Forte, &[0.])? && !self.elbow(detect)?))?
+                && self.heavy_forte(|| {
+                    Ok(self.truth(Op::Forte, &[0.])? && !self.elbow(detect_elbow)?)
+                })?
             {
-                if self.elbow(detect)? {
+                if self.elbow(detect_elbow)? {
                     continue;
                 }
                 if !self.wait_with(|| self.is_con_full(), 1.5, 0., || Ok(()), || Ok(()))? {
                     let fill = self.now()?;
                     while !self.is_con_full()? && self.now()? - fill < 2. && self.mornye_air()? {
                         self.stateful_normal(0.5)?;
-                        if self.elbow(detect)? {
+                        if self.elbow(detect_elbow)? {
                             break;
                         }
                     }

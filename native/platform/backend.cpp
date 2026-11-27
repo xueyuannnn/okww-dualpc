@@ -930,6 +930,9 @@ struct BackendDispatchSdk {
                 std::rethrow_exception(error);
             } catch (const std::exception &e) {
                 b.disarmFaultLocked("input_transport_error", "键鼠盒子通信失败：" + errorText(e));
+                b.inputFault_["input_action"] = q["op"];
+                if (q["op"] == "move")
+                    b.inputFault_["move_delta"] = QJsonArray{q["x"], q["y"]};
             }
             break;
         case rust::WorkflowOp::BackendRpcFailure:

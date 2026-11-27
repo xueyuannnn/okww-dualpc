@@ -8,6 +8,7 @@ struct RestartDialog {
 };
 RestartDialog restartDialog(const QVector<TextLine> &lines);
 bool combatIntroVisible(TaskContext &context);
+bool domainRewardObjective(TaskContext &context);
 std::optional<TextLine> nestExitConfirmation(const QVector<TextLine> &lines, int width);
 bool nestExitContext(const QVector<TextLine> &lines);
 bool isNestExitText(QString text);

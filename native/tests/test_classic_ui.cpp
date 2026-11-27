@@ -76,7 +76,7 @@ class ClassicUiTests final : public QObject {
         QVERIFY(dialog && dialog->text().contains("打开云游戏浏览器"));
         QVERIFY(dialog->text().contains("进入游戏后再启动"));
         QCOMPARE(connections,0);QVERIFY(!WindowStartupTestAccess::pending(*window));
-        QVERIFY(!window->findChild<QMessageBox *>("runtimeErrorDialog"));
+        QVERIFY(!window->findChild<QDialog *>("runtimeErrorDialog"));
         dialog->accept();
         auto open=window->findChild<QPushButton *>("openBrowserCloud");
         WindowStartupTestAccess::previewState(*window,false);QVERIFY(open->isEnabled());
@@ -301,7 +301,7 @@ class ClassicUiTests final : public QObject {
         QVERIFY(QMetaObject::invokeMethod(window.get(), "handleEngineMessage", Q_ARG(QJsonObject, rejection)));
         QVERIFY(backend->snapshot()["armed"].toBool());
         QVERIFY(backend->snapshot()["box"].toObject()["keys"].toArray().contains(26));
-        QVERIFY(!window->findChild<QMessageBox *>("runtimeErrorDialog"));
+        QVERIFY(!window->findChild<QDialog *>("runtimeErrorDialog"));
         backend->arm(false);
     }
     void executionProgressIsSharedByTaskAndScriptPagesWithoutMovingCards() {
@@ -387,22 +387,32 @@ class ClassicUiTests final : public QObject {
                                 {"traceback", "offline traceback marker"}};
         QVERIFY(QMetaObject::invokeMethod(window.get(), "handleEngineMessage", Q_ARG(QJsonObject, event)));
         QTRY_VERIFY(window->isVisible());
-        auto dialog = window->findChild<QMessageBox *>("runtimeErrorDialog");
+        auto dialog = window->findChild<QDialog *>("runtimeErrorDialog");
         QVERIFY(dialog && dialog->isVisible());
-        QVERIFY(dialog->detailedText().contains("offline traceback marker"));
+        auto details = dialog->findChild<QPlainTextEdit *>("runtimeErrorDetails");
+        QVERIFY(details && details->isHidden());
+        auto open = dialog->findChild<QPushButton *>("openDiagnostic");
+        QVERIFY(open && open->isVisible());
+        QCOMPARE(open->text(), QString("打开诊断包位置"));
+        auto guidance = dialog->findChild<QLabel *>("runtimeErrorGuidance");
+        QVERIFY(guidance && guidance->text().contains(product::supportEmail));
+        QVERIFY(guidance->text().contains(".zip"));
+        dialog->findChild<QPushButton *>("showRuntimeErrorDetails")->click();
+        QVERIFY(details->isVisible());
+        QVERIFY(details->toPlainText().contains("offline traceback marker"));
         QVERIFY(window->findChild<QLabel *>("applicationStatus")->text().contains("异常已暂停"));
         QVERIFY(!backend->snapshot()["armed"].toBool());
         QVERIFY(backend->snapshot()["capture_connected"].toBool());
         QVERIFY(QMetaObject::invokeMethod(window.get(), "handleEngineMessage", Q_ARG(QJsonObject, event)));
-        QCOMPARE(window->findChildren<QMessageBox *>("runtimeErrorDialog").size(), 1);
+        QCOMPARE(window->findChildren<QDialog *>("runtimeErrorDialog").size(), 1);
         const auto folders = QDir(data.path()+"/logs/diagnostics").entryList(QDir::Dirs|QDir::NoDotAndDotDot);
         QVERIFY(!folders.isEmpty());
         const auto report = readJson(data.path()+"/logs/diagnostics/"+folders.first()+"/report.json");
         QVERIFY(report["devices"].toObject()["capture_connected"].toBool());
         QVERIFY(!report.contains("config"));
-        dialog->button(QMessageBox::Ok)->click();
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Close)->click();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QVERIFY(!window->findChild<QMessageBox *>("runtimeErrorDialog"));
+        QVERIFY(!window->findChild<QDialog *>("runtimeErrorDialog"));
         QVERIFY(!backend->snapshot()["armed"].toBool());
         navigate(*window, "dualpc");
         auto retry = window->findChild<QPushButton *>("retryExecution");

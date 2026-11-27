@@ -40,6 +40,22 @@ class CaptureDesktopRunContracts final : public QObject {
             QVERIFY(sawResized);
         }
     }
+    void dxgiReopensDuplicationWhenFirstFrameIsMissing() {
+        const auto replay = capture_desktop_run_test::firstFrameRecoveryOutcome();
+        QVERIFY(replay["error"].toString().isEmpty());
+        QVERIFY(replay["recovery"].toString().isEmpty());
+        int sessions = 0, published = 0;
+        for (const auto value : replay["trace"].toArray()) {
+            const auto event = value.toObject();
+            sessions += event.contains("duplication");
+            if (event.contains("publish")) {
+                QCOMPARE(sessions, 2);
+                ++published;
+            }
+        }
+        QCOMPARE(sessions, 2);
+        QVERIFY(published > 0);
+    }
 };
 QTEST_GUILESS_MAIN(CaptureDesktopRunContracts)
 #include "test_capture_desktop_run_contract.moc"

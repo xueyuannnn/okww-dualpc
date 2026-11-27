@@ -1,5 +1,6 @@
 #pragma once
 #include "diagnostic_abi.hpp"
+#include "diagnostic_archive.hpp"
 #include "platform_workflow.hpp"
 #include "app_info.hpp"
 #include "common.hpp"
@@ -173,6 +174,13 @@ inline QJsonObject saveDiagnostic(const QString &data, QJsonObject event) {
                 fail("Rust 诊断记录宿主无效");
             }
         });
+    if (event["event"] == "error" && !event.contains("diagnostic_write_error")) {
+        try {
+            event["diagnostic_archive"] = writeDiagnosticArchive(QDir(folder));
+        } catch (const std::exception &e) {
+            event["diagnostic_archive_error"] = errorText(e);
+        }
+    }
     return event;
 }
 } // namespace okww::runtime

@@ -159,6 +159,63 @@ class EchoContracts : public QObject {
         for (int i = 0; i < 2048; ++i)
             QTest::newRow(qPrintable(QString::number(i))) << i;
     }
+    void remoteRestartReturnsThroughConfiguredGuide() {
+        echo_single_test::Probe p(8400);
+        p.config_["Advanced Skill Material Mode"] = false;
+        p.config_["Repeat Farm Count"] = 2;
+        p.remote = true;
+        p.failNextRestart = true;
+        QCOMPARE(p.candidate(), 2);
+        QCOMPARE(p.totalCompleted_, 2);
+        QCOMPARE(std::count(p.events.begin(), p.events.end(), QJsonValue("teleport")), 2);
+        QCOMPARE(std::count(p.events.begin(), p.events.end(), QJsonValue("restart-domain")), 1);
+    }
+    void weeklyRoundRetriesBeforeCounting() {
+        echo_single_test::Probe p(8232);
+        p.config_["Teleport to Boss"] = "Weekly Challenge";
+        p.config_["Repeat Farm Count"] = 1;
+        p.justEntered_ = true;
+        p.weeklyOutcomes = {0, 2, -1, 1};
+        QCOMPARE(p.candidate(), 1);
+        QCOMPARE(p.totalCompleted_, 1);
+        QCOMPARE(p.attempts, 3);
+        QCOMPARE(std::count(p.events.begin(), p.events.end(), QJsonValue("restart-domain")), 1);
+        QVERIFY(p.events.contains(QJsonArray{"weekly-recovery", 2, 1, 0}));
+        QVERIFY(p.events.contains(QJsonArray{"weekly-recovery", -1, 2, 0}));
+    }
+    void repeatedWeeklyFailureLeavesRoundUncounted() {
+        echo_single_test::Probe p(8232);
+        p.config_["Teleport to Boss"] = "Weekly Challenge";
+        p.config_["Repeat Farm Count"] = 1;
+        p.justEntered_ = true;
+        p.weeklyOutcomes = {-1, -1, -1};
+        QVERIFY_EXCEPTION_THROWN(p.candidate(), std::runtime_error);
+        QCOMPARE(p.totalCompleted_, 0);
+        QCOMPARE(std::count(p.events.begin(), p.events.end(), QJsonValue("restart-domain")), 2);
+    }
+    void previousRewardScreenRestartsUncountedRound() {
+        echo_single_test::Probe p(8232);
+        p.config_["Teleport to Boss"] = "No";
+        p.config_["Repeat Farm Count"] = 1;
+        p.justEntered_ = true;
+        p.previousRewardReturns = 1;
+        QCOMPARE(p.candidate(), 1);
+        QCOMPARE(p.totalCompleted_, 1);
+        QCOMPARE(p.attempts, 1);
+        QCOMPARE(std::count(p.events.begin(), p.events.end(), QJsonValue("restart-domain")), 1);
+        QVERIFY(p.events.contains(QJsonValue("previous-reward")));
+    }
+    void repeatedPreviousRewardLeavesRoundUncounted() {
+        echo_single_test::Probe p(8232);
+        p.config_["Teleport to Boss"] = "No";
+        p.config_["Repeat Farm Count"] = 1;
+        p.justEntered_ = true;
+        p.previousRewardReturns = 2;
+        QVERIFY_THROWS_EXCEPTION(RestartNavigationFailure, p.candidate());
+        QCOMPARE(p.totalCompleted_, 0);
+        QCOMPARE(p.attempts, 0);
+        QCOMPARE(std::count(p.events.begin(), p.events.end(), QJsonValue("restart-domain")), 1);
+    }
     void single() {
         QFETCH(int, scene);
         const auto expected = echo_single_test::trace(scene, false),

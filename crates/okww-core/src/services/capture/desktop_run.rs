@@ -27,6 +27,10 @@ impl Host {
                 self.action(Op::DesktopRunVerifyUnchanged, &[])?;
             }
             if self.flag(Op::DesktopRunImageNull, &[])? {
+                if self.flag(Op::DesktopRunFirstFrameTimedOut, &[])? {
+                    self.action(Op::DesktopRunReportFirstFrameRetry, &[])?;
+                    self.action(Op::DesktopRunResetDuplication, &[])?;
+                }
                 self.action(Op::DesktopRunWaitMilliseconds, &[5.])?;
                 self.action(Op::DesktopRunDropImage, &[])?;
                 self.action(Op::DesktopRunDropRect, &[])?;

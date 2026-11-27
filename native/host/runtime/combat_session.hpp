@@ -95,6 +95,7 @@ class CombatSession final : public CombatHost {
     std::function<bool()> onCombatCheck, combatEndCondition;
     double targetEnemyTimeout = 3;
     bool hasHealthBar() { return healthBar(); }
+    std::optional<bool> challengeResult() { return vision_.challengeResult(); }
     bool closeRevivalDialog();
     double now() const override { return context_.execution.now(); }
     void sleep(double seconds) override;
@@ -183,6 +184,9 @@ class CombatSession final : public CombatHost {
     int segmentedGauge(QSize reference, QRect area, ColorRange color, int segments, int minFrequency,
                        int maxFrequency, double minAmplitude) override;
     bool isAutoCombatTask() const override { return context_.task == "AutoCombatTask"; }
+    bool remoteDesktopCombat() const override {
+        return context_.streamedCapture && !context_.localDesktopGame && context_.streamedImage();
+    }
     void log(const QString &message) override;
 };
 } // namespace okww::runtime

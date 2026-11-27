@@ -48,6 +48,10 @@ impl Host {
         self.action(Op::ApplyIntro, &[intro as u8 as f64])?;
         let start = self.now()?;
         let mut last_click = 0.;
+        let remote = self.flag(Op::DesktopCapture, &[])?
+            && self.flag(Op::StreamedImage, &[])?
+            && !self.flag(Op::LocalDesktopGame, &[])?;
+        let mut first_target_frame = None;
         while self.now()? - start <= 10. {
             if !self.flag(Op::TargetSkipCheck, &[intro as u8 as f64])? {
                 self.action(Op::CheckCombat, &[])?;
@@ -55,6 +59,28 @@ impl Host {
                 self.action(Op::Watchdog, &[])?;
             }
             let hud = self.values(Op::ReadHud, &[])?;
+            let mut target_confirmed = false;
+            if remote {
+                let target = self.call(Op::TargetIndex, &[])?;
+                if hud[0] == 0. || hud[1] != self.call(Op::PartySize, &[])? || hud[2] < 0. {
+                    first_target_frame = None;
+                    self.action(Op::Sleep, &[0.025])?;
+                    self.action(Op::NextFrame, &[])?;
+                    continue;
+                }
+                if hud[2] == target {
+                    let frame = self.call(Op::SwitchFrameSequence, &[])?;
+                    target_confirmed = first_target_frame.is_some_and(|first| frame != first);
+                    if !target_confirmed {
+                        first_target_frame.get_or_insert(frame);
+                        self.action(Op::Sleep, &[0.025])?;
+                        self.action(Op::NextFrame, &[])?;
+                        continue;
+                    }
+                } else {
+                    first_target_frame = None;
+                }
+            }
             if hud[2] == self.call(Op::PreviousIndex, &[])? {
                 self.action(Op::UpdatePortraits, &[])?;
                 let refreshed = intro || self.flag(Op::PreviousConFull, &[])?;
@@ -69,17 +95,24 @@ impl Host {
                     self.action(Op::BreakF, &[])?;
                 }
             }
-            if self.flag(Op::TargetWaitSwitch, &[])? {
+            if !target_confirmed && self.flag(Op::TargetWaitSwitch, &[])? {
                 self.action(Op::ClickDefault, &[])?;
                 self.action(Op::Sleep, &[0.1])?;
                 continue;
             }
-            if self.now()? - last_click > 0.1 {
+            if !target_confirmed && self.now()? - last_click > if remote { 0.25 } else { 0.1 } {
                 last_click = self.now()?;
-                self.action(Op::TapTargetIndex, &[])?;
-                self.action(Op::Sleep, &[0.001])?;
-                self.action(Op::ClickDefault, &[])?;
-                self.action(Op::Sleep, &[0.001])?;
+                self.action(Op::TapTargetIndex, &[if remote { 0.05 } else { 0.01 }])?;
+                if !remote {
+                    self.action(Op::Sleep, &[0.001])?;
+                    self.action(Op::ClickDefault, &[])?;
+                    self.action(Op::Sleep, &[0.001])?;
+                }
+            }
+            if remote && !target_confirmed {
+                self.action(Op::Sleep, &[0.025])?;
+                self.action(Op::NextFrame, &[])?;
+                continue;
             }
             let hud = self.values(Op::ReadHud, &[])?;
             if hud[0] == 0. {

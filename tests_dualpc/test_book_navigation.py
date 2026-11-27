@@ -96,9 +96,57 @@ def test_buttons_left_of_old_search_boundary_are_read_without_template(label):
 
 def test_group_header_edge_is_not_counted_as_a_proceed_button():
     edge = SimpleNamespace(x=1215, y=590, width=20, height=40, confidence=.75)
-    task = SimpleNamespace(frame=np.full((720, 1280, 3), 180, np.uint8), box_of_screen=Mock(),
+    task = SimpleNamespace(frame=np.full((720, 1280, 3), 35, np.uint8), box_of_screen=Mock(),
                            find_feature=Mock(return_value=[edge]), ocr=Mock(return_value=[]))
     assert book.read_rows(task) == []
+
+
+def test_selector_text_and_reward_number_are_not_row_titles():
+    def line(x, y, text):
+        return SimpleNamespace(x=x, y=y, width=90, height=15, name=text, confidence=.98)
+
+    button = line(1090, 208, '前往')
+    frame = np.zeros((720, 1280, 3), np.uint8)
+    task = SimpleNamespace(frame=frame, box_of_screen=Mock(), find_feature=Mock(return_value=[]),
+                           ocr=Mock(return_value=[line(600, 160, '选查看各等级奖励'),
+                                                  line(600, 180, '450'),
+                                                  line(600, 194, '失坠困咎之庭'), button]))
+    rows = book.read_rows(task)
+    assert [r.title for r in rows] == ['失坠困咎之庭']
+
+
+def test_refuses_middle_of_list_when_reset_scroll_is_ignored(monkeypatch):
+    frame = np.zeros((720, 1280, 3), np.uint8)
+    frame[260:400, 1244:1248] = 235
+    task = SimpleNamespace(frame=frame, scroll_relative=Mock(), sleep=Mock(), screenshot=Mock(), click=Mock())
+    monkeypatch.setattr(book, 'read_rows', lambda _: [row(n) for n in range(4, 8)])
+    with pytest.raises(RuntimeError, match='未确认列表顶部'):
+        book.select_book_target(task, 2, 21)
+    task.click.assert_not_called()
+
+
+def test_small_wheel_steps_keep_scrolling_toward_sixth_entry(monkeypatch):
+    position = [0]
+    task = SimpleNamespace(sleep=Mock(), screenshot=Mock(), info_set=Mock(), click=Mock(),
+                           wait_feature=Mock(return_value=SimpleNamespace(name='team_close')))
+
+    def scroll(_x, _y, count):
+        position[0] = 0 if count > 50 else position[0] - count
+
+    def observe(_task):
+        rows = []
+        for index in range(1, 12):
+            y = .31 + (index - 1) * .14 - position[0] * .006
+            if .21 <= y <= .86:
+                item = row(index)
+                item.y = y
+                rows.append(item)
+        return rows
+
+    task.scroll_relative = scroll
+    monkeypatch.setattr(book, 'read_rows', observe)
+    assert book.select_book_target(task, 6, 21)
+    assert task.click.call_args.args[0] == 6
 
 
 def test_top_clipped_title_can_use_two_other_stationary_rows():

@@ -90,7 +90,7 @@ struct NavigationBridge {
     std::function<void()> operation;
     std::function<bool()> condition;
     QJsonArray catalog;
-    std::optional<Match> found, tab, best, item, next;
+    std::optional<Match> found, tab, best, item;
     std::optional<TextLine> label;
     TextLine resultLine;
     QPointF point;
@@ -104,6 +104,7 @@ struct NavigationBridge {
     uint64_t guideFrameVersion = 0;
     QJsonObject guideProbe;
     std::optional<bool> lastGuideVisible;
+    bool nextIsChallenge = false;
     int guideKeyAttempts = 0;
 
     QRect guideSidebar() const {
@@ -607,7 +608,7 @@ struct NavigationBridge {
                     break;
                 }
                 case rust::WorkflowOp::BookAtTop:
-                    out[0]=bookListAtTop(c,int(a[0]));
+                    out[0]=bookListBoundary(c,a[0]!=0.);
                     break;
                 case rust::WorkflowOp::StoreBookRows:
                     previousBookRows=bookRows;
@@ -616,8 +617,8 @@ struct NavigationBridge {
                     out[0]=bookRowSimilarity(previousBookRows.at(int(a[0])),bookRows.at(int(a[1])),a[2]!=0);
                     out[1]=(previousBookRows.at(int(a[0])).button.center().y()-bookRows.at(int(a[1])).button.center().y())/c.frame.rows;
                     out[2]=previousBookRows.at(int(a[0])).title.isEmpty() && bookRows.at(int(a[1])).title.isEmpty() &&
-                        previousBookRows.at(int(a[0])).button.center().y()<c.frame.rows*.28 &&
-                        bookRows.at(int(a[1])).button.center().y()<c.frame.rows*.28;
+                        previousBookRows.at(int(a[0])).button.center().y()<c.frame.rows*.30 &&
+                        bookRows.at(int(a[1])).button.center().y()<c.frame.rows*.30;
                     break;
                 case rust::WorkflowOp::BookSelectionFailure: {
                     QJsonArray observed;
@@ -648,8 +649,17 @@ struct NavigationBridge {
                     break;
                 }
                 case rust::WorkflowOp::FindNextInterface: {
-                    next = c.findAny({"fast_travel_custom", "gray_teleport", "remove_custom", "team_start_challenge", "team_close"});
-                    out[0] = next.has_value();
+                    nextIsChallenge = false;
+                    if (c.findAny({"fast_travel_custom", "gray_teleport", "remove_custom"})) {
+                        out[0] = true;
+                        break;
+                    }
+                    nextIsChallenge = c.find("team_start_challenge").has_value();
+                    if (!nextIsChallenge && c.find("team_close")) {
+                        nextIsChallenge = matchingText(c.text(.63, .85, .96, .96, .65),
+                            "^(?:单人挑[战戰]|單人挑[战戰]|Solo\\s*Challenge|Single[- ]?Player\\s*Challenge)$").has_value();
+                    }
+                    out[0] = nextIsChallenge;
                     break;
                 }
                 case rust::WorkflowOp::WeeklyTeleport: {
@@ -668,7 +678,7 @@ struct NavigationBridge {
                     break;
                 }
                 case rust::WorkflowOp::NextIsTeamClose: {
-                    out[0] = next->name == "team_close" || next->name == "team_start_challenge";
+                    out[0] = nextIsChallenge;
                     break;
                 }
                 case rust::WorkflowOp::Throw: {

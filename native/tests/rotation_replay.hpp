@@ -123,8 +123,12 @@ class RotationReplay final : public CombatHost {
     }
     bool available(Skill skill, int = -1, bool = true, bool = true) override {
         refreshReady();
+        if (skill == Skill::Echo && config_.contains("echo_dark_at") &&
+            time_ >= config_["echo_dark_at"].toDouble())
+            return false;
         return skill != Skill::ExtraAction && ready_[int(skill)];
     }
+    bool remoteDesktopCombat() const override { return config_["remote_desktop"].toBool(); }
     double highlighted(Skill skill) override {
         const auto white = config_["white"].toObject();
         const auto key = "box_" + QStringList{"resonance", "echo", "liberation", "extra_action"}[int(skill)];

@@ -3,6 +3,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 
+from dualpc.book_navigation import BOOK_WHEEL_POINT
 from ok import CannotFindException, TaskDisabledException, WaitFailedException
 from src.task.BaseCombatTask import NotInCombatException
 from src.task.DomainTask import DomainTask
@@ -68,7 +69,7 @@ class CultivationTask(NativeActivity, DomainTask):
     TACET_OPTION = 'Echo Set Tacet Suppression'
     NIGHTMARE_OPTION = 'Echo Set Nightmare Nest'
     DEFEATED_PATTERN = re.compile(r'已击败残象[:：]?(\d+)/(\d+)')
-    ECHO_SCROLLS = 3
+    ECHO_SCROLLS = 8
     WEEKLY_MATERIAL = '技能升级材料'
     WEEKLY_PATTERN = re.compile(r'本周剩余可收取次数[:：]?(\d+)/\d+')
     CLAIM_COST_PATTERN = re.compile(r'领取奖励需消耗\s*(\d+)\s*点结晶波片')
@@ -573,8 +574,9 @@ class CultivationTask(NativeActivity, DomainTask):
             if rows:
                 return rows[0]
             if attempt < self.ECHO_SCROLLS:
-                self.scroll_relative(0.68, 0.6, -5)
-                self.sleep(1)
+                # The rewards strip consumes the mouse wheel horizontally.
+                self.scroll_relative(*BOOK_WHEEL_POINT, -2)
+                self.sleep(.65)
         return None
 
     def enter_echo_row(self, kind):

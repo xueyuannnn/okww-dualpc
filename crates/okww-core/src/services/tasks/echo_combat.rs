@@ -1,5 +1,49 @@
 use crate::services::*;
 impl Host {
+    fn run_echo_round_combat(&self) -> Result {
+        if self.flag(Op::RunEchoCombatOnce, &[])? {
+            self.action(Op::RestartEchoDomain, &[])?;
+            if self.flag(Op::RunEchoCombatOnce, &[])? {
+                return self.action(Op::EchoCombatFailure, &[3.]);
+            }
+        }
+        Ok(())
+    }
+    fn verify_weekly_echo_round(&self) -> Result {
+        for retry in 0..=2 {
+            let outcome = Cell::new(self.scalar(Op::EchoWeeklyRoundOutcome, &[])?);
+            if outcome.get() == 0.
+                && !self.wait_for_interval(
+                    || {
+                        let value = self.scalar(Op::EchoWeeklyRoundOutcome, &[])?;
+                        outcome.set(value);
+                        Ok(value != 0.)
+                    },
+                    12.,
+                    0.35,
+                )?
+            {
+                return self.action(Op::EchoCombatFailure, &[2.]);
+            }
+            if outcome.get() == 1. {
+                return Ok(());
+            }
+            if retry == 2 {
+                return self.action(Op::EchoCombatFailure, &[2.]);
+            }
+            if self.flag(Op::HasInfo, &[])? {
+                self.action(
+                    Op::EchoWeeklyRoundRecoveryInfo,
+                    &[outcome.get(), retry as f64 + 1.],
+                )?;
+            }
+            if outcome.get() == -1. {
+                self.action(Op::RestartEchoDomain, &[])?;
+            }
+            self.run_echo_round_combat()?;
+        }
+        Err(HOST_ERROR)
+    }
     pub(in crate::services) fn run_echo_combat(
         &self,
         method: Method,
@@ -96,7 +140,10 @@ impl Host {
                 let liberation = self.flag(Op::EchoUseLiberation, &[])?;
                 self.action(Op::SetEchoCombatLiberation, &[liberation as u8 as f64])?;
                 self.action(Op::SetEchoCombatRecovery, &[])?;
-                self.action(Op::RunEchoCombatOnce, &[])?;
+                self.run_echo_round_combat()?;
+                if self.flag(Op::EchoRealm, &[])? && self.flag(Op::EchoWeeklyCategory, &[])? {
+                    self.verify_weekly_echo_round()?;
+                }
                 let mut dropped = self.flag(Op::EchoPickEchoOnly, &[])?;
                 if !dropped {
                     match self.scalar(Op::EchoPickupMethod, &[])? as i32 {
@@ -155,8 +202,23 @@ impl Host {
                     } else {
                         0.5
                     };
-                    self.action(Op::ClickRelative, &[x, 0.85, 1.])?;
-                    self.action(Op::EchoWaitTeam, &[120.])?;
+                    if count + 1 < total && x == 0.63 && self.flag(Op::RemoteEchoRun, &[])? {
+                        // The reward is already verified. If reopening fails,
+                        // recovery must start the next round, not claim again.
+                        count += 1;
+                        self.action(Op::IncrementEchoTotalCompleted, &[])?;
+                        self.action(Op::RestartEchoDomain, &[])?;
+                        self.action(Op::StoreEchoJustEntered, &[1.])?;
+                        travel_retries = 0;
+                        recoveries = 0;
+                        if self.flag(Op::HasInfo, &[])? {
+                            self.action(Op::EchoSingleCountsInfo, &[count as f64, total as f64])?;
+                        }
+                        return Ok(());
+                    } else {
+                        self.action(Op::ClickRelative, &[x, 0.85, 1.])?;
+                        self.action(Op::EchoWaitTeam, &[120.])?;
+                    }
                     if self.flag(Op::EchoRealm, &[])? && count + 1 < total {
                         self.action(Op::StoreEchoJustEntered, &[1.])?;
                     }
@@ -201,6 +263,18 @@ impl Host {
                         return Err(HOST_ERROR);
                     }
                     self.action(Op::StoreEchoEntryAtHeal, &[1.])?;
+                    self.action(Op::TeleportEcho, &[])?;
+                }
+                9 => {
+                    self.action(Op::ClearException, &[])?;
+                    if travel_retries >= 2
+                        || !self.flag(Op::RemoteEchoRun, &[])?
+                        || !self.flag(Op::EchoTeleportEnabled, &[])?
+                    {
+                        self.action(Op::RethrowHandled, &[])?;
+                        return Err(HOST_ERROR);
+                    }
+                    travel_retries += 1;
                     self.action(Op::TeleportEcho, &[])?;
                 }
                 2 => {

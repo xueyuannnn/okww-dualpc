@@ -25,6 +25,8 @@ std::array<double, 3> workflowRun(WorkflowMethod method, std::span<const double>
                         out[0] = 0;
                     } catch (const runtime::Cancelled &) {
                         out[0] = 1;
+                    } catch (const runtime::RestartNavigationFailure &) {
+                        out[0] = 9;
                     } catch (const runtime::NavigationFailure &) {
                         out[0] = 2;
                     } catch (const runtime::CharacterRevived &) {
